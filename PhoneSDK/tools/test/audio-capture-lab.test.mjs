@@ -147,8 +147,8 @@ test('Audio Capture Lab plays transferred Opus in H5 without native playback met
   const plugin = await readFile(`${root}/examples/audio-capture-lab/plugin.js`, 'utf8');
   assert.doesNotMatch(html, /voice-effect|playback\.voice|voice\.(?:original|cute|deep|overlord)/);
   assert.doesNotMatch(plugin, /voiceEffect|voice\.(?:cute|deep|overlord)/);
-  assert.match(plugin, /opusRecordingToOgg\(recordingResult\)/);
-  assert.match(plugin, /recordingPlayer\.play\(\)/);
+  assert.match(plugin, /createRecordingPlayer\(ui\.recordingPlayer, opusRecordingToOgg\)/);
+  assert.match(plugin, /recordingPlayback\.play\(recordingResult\)/);
   assert.doesNotMatch(plugin, /gm\.audio\.(?:playRecording|stopPlayback)/);
 });
 
@@ -177,7 +177,7 @@ test('Audio Capture Lab does not stop capture when the page becomes hidden', asy
   assert.match(plugin, /window\.clearInterval\(telemetryTimer\)/);
   assert.match(plugin, /captureAbortController\?\.abort\('Audio Capture Lab page unloaded'\)/);
   assert.match(plugin, /if \(currentCapture\) void currentCapture\.stop\(\)\.catch\(\(\) => \{\}\)/);
-  assert.match(plugin, /URL\.revokeObjectURL\(recordingUrl\)/);
+  assert.match(plugin, /recordingPlayback\.stop\(\)/);
   assert.match(plugin, /ui\.stopCapture\.addEventListener\('click', \(\) => void stopCapture\('phone-button'\)\)/);
   assert.match(plugin, /event\.action === 'single'\) void stopActiveOperation\('glasses-button'\)/);
 });

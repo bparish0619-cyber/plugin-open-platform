@@ -31,6 +31,10 @@ The native flow registers `gm.audio.onCaptureState`, then calls
 Web SDK convenience helper consumes the Host's unified stream immediately. Stopping
 returns Opus bytes and frame boundaries to H5. The page wraps those packets in
 Ogg and plays them with `<audio>` at a higher playback rate for the pet effect.
+Before playback, `canPlayType('audio/ogg; codecs=opus')` checks format support.
+Unsupported browsers (including iOS 16) decode packets locally into 16 kHz mono
+PCM WAV. A native Ogg format failure also retries WAV; permission failures do not.
+The bundled pure JavaScript decoder needs no network, WASM, or unsafe-eval grant.
 This simple pet example intentionally does not consume the real-time stream API.
 
 ## Device controls
