@@ -1,4 +1,5 @@
 import { createGMPlugin, opusRecordingToOgg } from './vendor/gm-plugin-web-sdk.esm.js';
+import { createRecordingPlayer } from './vendor/recording-playback.js';
 import { encodePetState, PET_STATE_CHANNEL } from './device-protocol.js';
 import {
   createOpeningCaptureTerminalTracker,
@@ -89,7 +90,28 @@ let nativeCapture;
 let nativeStopPromise;
 let nativeStartRequestInFlight = false;
 let nativePressGeneration = 0;
+let pageUnloaded = false;
 const openingCaptureTerminals = createOpeningCaptureTerminalTracker();
+const recordingAudio = new Audio();
+const recordingPlayback = createRecordingPlayer(recordingAudio, opusRecordingToOgg);
+recordingAudio.playbackRate = 1.3;
+recordingAudio.defaultPlaybackRate = 1.3;
+recordingAudio.preservesPitch = false;
+if ('webkitPreservesPitch' in recordingAudio) recordingAudio.webkitPreservesPitch = false;
+recordingAudio.addEventListener('play', () => {
+  resetTalkButton();
+  say('Memo heard you through the glasses and says:');
+  startMouthAnimation();
+  setDeviceMood('talking', 15000);
+  burst('♪', 9, 'note');
+  change({ happy: 10, energy: -2 }, 15);
+});
+recordingAudio.addEventListener('ended', () => {
+  stopMouthAnimation(); resetDeviceMood();
+});
+recordingAudio.addEventListener('error', () => {
+  stopMouthAnimation(); resetDeviceMood();
+});
 
 // Bridge 2.0 capture data uses the native binary stream, not JSON audio.frames.
 gm.audio.onCaptureState((audioState) => {
@@ -185,23 +207,9 @@ function discardNativeCapture(capture) {
 }
 
 async function playGlassesRecording(recording) {
+  if (pageUnloaded) return;
   showProcessingState();
-  const audioUrl = URL.createObjectURL(opusRecordingToOgg(recording));
-  const audio = new Audio(audioUrl);
-  audio.playbackRate = 1.3;
-  audio.preservesPitch = false;
-  audio.addEventListener('play', () => {
-    resetTalkButton();
-    say('Memo heard you through the glasses and says:');
-    startMouthAnimation();
-    setDeviceMood('talking', 15000);
-    burst('♪', 9, 'note');
-    change({ happy: 10, energy: -2 }, 15);
-  });
-  audio.addEventListener('ended', () => {
-    stopMouthAnimation(); resetDeviceMood(); URL.revokeObjectURL(audioUrl);
-  }, { once: true });
-  try { await audio.play(); } catch (error) { URL.revokeObjectURL(audioUrl); throw error; }
+  await recordingPlayback.play(recording);
 }
 
 function setPetVisual(stateName) {
@@ -639,6 +647,8 @@ async function startRecording(event) {
       (nativeAudioState !== 'idle' && nativeAudioState !== 'stopped' && nativeAudioState !== 'error')) return;
   const pressGeneration = ++nativePressGeneration;
   try {
+    recordingPlayback.stop();
+    stopMouthAnimation();
     nativeAudioState = 'starting';
     nativeStartRequestInFlight = true;
     const capture = await gm.audio.openRecording({
@@ -768,6 +778,8 @@ async function initialize() {
 }
 
 window.addEventListener('pagehide', () => {
+  pageUnloaded = true;
+  recordingPlayback.stop();
   window.clearInterval(decayTimer);
   window.clearTimeout(glassesSyncTimer);
   window.clearTimeout(deviceMoodTimer);

@@ -1,4 +1,5 @@
 import { createGMPlugin, opusRecordingToOgg } from './vendor/gm-plugin-web-sdk.esm.js';
+import { createRecordingPlayer } from './vendor/recording-playback.js';
 import { AUDIO_LAB_STATE_CHANNEL, encodeAudioLabState } from './device-protocol.js';
 import { createI18n } from './i18n.js';
 import { StreamMetrics } from './stream-metrics.js';
@@ -57,7 +58,7 @@ let captureAbortController;
 let consumePromise;
 let operationStartedAt = 0;
 let recordingResult;
-let recordingUrl;
+const recordingPlayback = createRecordingPlayer(ui.recordingPlayer, opusRecordingToOgg);
 let playbackActive = false;
 let currentState = 'unavailable';
 let lastErrorCode;
@@ -423,12 +424,11 @@ async function playRecording() {
   try {
     playbackActive = true;
     setLabState('playback', t('notice.playback'));
-    if (recordingUrl) URL.revokeObjectURL(recordingUrl);
-    recordingUrl = URL.createObjectURL(opusRecordingToOgg(recordingResult));
-    ui.recordingPlayer.src = recordingUrl;
     logEvent('playback.h5', { frames: recordingResult.frameCount, bytes: recordingResult.opusBytes });
-    await ui.recordingPlayer.play();
+    const format = await recordingPlayback.play(recordingResult);
+    logEvent('playback.format', { format });
   } catch (error) {
+    if (error.name === 'AbortError') return;
     playbackActive = false;
     logEvent('playback.error', { code: errorCode(error), message: error.message });
     setLabState('error', t('notice.playbackFailed', { message: error.message }), errorCode(error));
@@ -439,7 +439,7 @@ async function playRecording() {
 
 async function stopPlayback() {
   if (!playbackActive) return;
-  ui.recordingPlayer.pause();
+  recordingPlayback.stop();
   playbackActive = false;
   setLabState('ready', t('notice.playbackState', { state: t('playback.stopped') }));
   updateControls();
@@ -581,11 +581,7 @@ function cleanup() {
   captureGeneration += 1;
   captureAbortController?.abort('Audio Capture Lab page unloaded');
   if (currentCapture) void currentCapture.stop().catch(() => {});
-  if (playbackActive) ui.recordingPlayer.pause();
-  if (recordingUrl) {
-    URL.revokeObjectURL(recordingUrl);
-    recordingUrl = undefined;
-  }
+  recordingPlayback.stop();
 }
 
 window.addEventListener('beforeunload', cleanup, { once: true });
