@@ -73,8 +73,15 @@ On Windows, run:
 
 The Windows x64 MSVC build links the WebView2 loader statically, so no loader
 DLL is required beside the executable. The target computer still requires the
-Microsoft Edge WebView2 Runtime. On Linux and macOS, open the application
-package included in the matching platform directory.
+Microsoft Edge WebView2 Runtime.
+
+On macOS, open [`macos/gm-plugin-studio-desktop.dmg`](macos/gm-plugin-studio-desktop.dmg)
+and install MemoMind Plugin Studio. The Universal 2 package supports Intel and
+Apple silicon Macs. Its filename uses the same `gm-plugin-studio-desktop` base
+name as the Windows executable.
+
+On Linux, open the application package included in the matching platform
+directory.
 
 ## What Desktop Studio provides
 
