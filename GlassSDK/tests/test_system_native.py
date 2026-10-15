@@ -22,14 +22,21 @@ class SystemEventTests(unittest.TestCase):
                 continue
             with self.subTest(example=source.parent.name), tempfile.TemporaryDirectory() as folder:
                 binary = Path(folder) / 'test'
+                link_flags = []
                 flags = [f'-DTEST_PLUGIN_SOURCE="{source.as_posix()}"']
                 if source.parent.name in defines:
                     flags.append('-D' + defines[source.parent.name])
+                # Direct framebuffer viewer has its own receive/call/lifecycle fixture.
+                test_source = SDK / 'tests' / 'test_examples_call.c'
+                if source.parent.name == 'image_viewer':
+                    test_source = SDK / 'tests' / 'test_image_viewer.c'
+                    flags = []
+                    link_flags = shlex.split(os.environ.get('LZ4_LINK_FLAGS', '-llz4'))
                 subprocess.run([
                     CC, '-std=c11', '-Wall', '-Wextra', '-Werror',
                     *shlex.split(os.environ.get('CFLAGS', '')), *flags,
                     '-I', str(SDK / 'include'),
-                    str(SDK / 'tests' / 'test_examples_call.c'), '-o', str(binary),
+                    str(test_source), '-o', str(binary), *link_flags,
                 ], check=True)
                 subprocess.run([str(binary)], check=True)
 
