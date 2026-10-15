@@ -15,6 +15,7 @@ test('plugin uses English under Chinese, English and missing system locales', ()
 
 test('English formatting preserves filenames and diagnostic text literally', () => {
   const local=createI18n({navigator:{languages:['zh-CN']}});
+  // Non-ASCII filename fixture: preserve user content independently of UI language.
   const raw='<img onerror=x> {slot} $& 中文.png';
   assert.ok(local.t('notice.slotError',{slot:2,error:raw}).includes(raw));
   assert.equal(local.number(105000),'105,000');

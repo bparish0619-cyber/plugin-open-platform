@@ -7,7 +7,6 @@ import { pathToFileURL, fileURLToPath } from 'node:url';
 const root = process.env.IMAGE_VIEWER_REPO ?? fileURLToPath(new URL('../../', import.meta.url)).replace(/\/$/, '');
 const locale = process.env.IMAGE_VIEWER_LOCALE ?? 'zh-CN';
 // The system locale is configurable; the plugin UI is always English.
-const wording = (_zh, en) => en;
 const moduleName = process.env.PLAYWRIGHT_MODULE ?? 'playwright';
 const { chromium } = await import(moduleName.startsWith('/') ? pathToFileURL(moduleName) : moduleName);
 const artifacts = await mkdtemp(join(tmpdir(),'pixel-viewer-browser-'));
@@ -50,16 +49,17 @@ try {
     await route.fulfill({response,body});
   });
   await page.goto('http://127.0.0.1:4187');
+  // The host consent dialog orders Start before Cancel; avoid locale-specific text.
   await page.locator('dialog').waitFor();
   for(const box of await page.locator('dialog input').all()) await box.check();
-  await page.getByText('按所选权限启动',{exact:true}).click();
+  await page.locator('dialog button').first().click();
   const frame=page.frameLocator('#plugin-frame');
   await frame.locator('.pick').first().waitFor();
   await page.waitForFunction(()=>!document.querySelector('#plugin-frame').contentDocument.querySelector('.pick')?.disabled);
   assert.equal(await frame.locator('.card').count(),1, 'slots share one preview');
   assert.equal(await frame.locator('.slot').count(),10, 'ten slots initially');
   assert.equal(await frame.locator('html').getAttribute('lang'),'en');
-  assert.equal(await frame.locator('.send').textContent(),wording('发送到眼镜','Send to glasses'));
+  assert.equal(await frame.locator('.send').textContent(),'Send to glasses');
   assert.equal(await frame.locator('.slot-heading, .card h2').count(),0);
   for (const selector of ['#cancel','#retry','#progress','.connection-actions']) {
     assert.equal(await frame.locator(selector).isVisible(),false);
@@ -146,7 +146,7 @@ try {
       assert.equal(await frame.locator('.name').isVisible(),false);
       await page.locator('#plugin-frame').screenshot({path:join(artifacts,`sending-${i===0?320:390}.png`)});
     } finally { releaseChunk(); }
-    await frame.locator('#status').filter({hasText:wording('眼镜已确认显示图片', 'Glasses confirmed display')}).waitFor();
+    await frame.locator('#status').filter({hasText:'Glasses confirmed display'}).waitFor();
     assert.deepEqual(await layoutPositions(),beforeTransfer,'completion must not move the layout');
   }
   // Switching uses cached pixels and packets, without file reads or automatic sends.
@@ -162,7 +162,7 @@ try {
   for(let i=0;i<2;i++) {
     await frame.locator('.slot').nth(i).click();
     await frame.locator('.send').click();
-    await frame.locator('#status').filter({hasText:wording('眼镜已确认显示图片', 'Glasses confirmed display')}).waitFor();
+    await frame.locator('#status').filter({hasText:'Glasses confirmed display'}).waitFor();
     assert.deepEqual(transfers[i+2],transfers[i], 'resend uses the original slot frame');
   }
   // Failed persistence must not create a phantom slot or replace a saved image.
@@ -284,19 +284,20 @@ try {
   // Picker cancellation preserves the current replacement image.
   await page.evaluate(()=>{globalThis.imageTestRuntime.filePicker=async()=>[];});
   await frame.locator('.pick').first().click();
-  await frame.locator('#status').filter({hasText:wording('已取消选择', 'Selection cancelled')}).waitFor();
+  await frame.locator('#status').filter({hasText:'Selection cancelled'}).waitFor();
   assert.equal(await frame.locator('.name').first().textContent(),'pattern-1.png');
   // Reopen through the Host to verify persistence and initialization retry.
   // This is an explicit Host restart, never the plugin's connection button.
   await page.evaluate(()=>{globalThis.imageFailReady=true;globalThis.imageFailSubscribe=true;});
   await page.locator('#reload').click();
+  // The host consent dialog orders Start before Cancel; avoid locale-specific text.
   await page.locator('dialog').waitFor();
   for(const box of await page.locator('dialog input').all()) await box.check();
-  await page.getByText('按所选权限启动',{exact:true}).click();
+  await page.locator('dialog button').first().click();
   await frame.locator('#status.error').filter({hasText:'temporary ready failure'}).waitFor();
   await frame.locator('main').evaluate(()=>{window.retryDocument=document;});
   await frame.locator('#retry').click();
-  await frame.locator('#status').filter({hasText:wording('可以选择和预览本地图片', 'Local images are available')}).waitFor();
+  await frame.locator('#status').filter({hasText:'Local images are available'}).waitFor();
   assert.equal(await frame.locator('main').evaluate(()=>document===window.retryDocument),true);
   assert.equal(await frame.locator('.pick').isEnabled(),true);
   assert.equal(await frame.locator('.slot').count(),40, 'all added slots survive Host restart');
@@ -333,7 +334,7 @@ try {
   await frame.locator('.send').first().click();
   await frame.locator('#status.error').waitFor();
   assert.deepEqual(await layoutPositions(),beforeError,'errors must not move the preview');
-  assert.ok((await frame.locator('#status').textContent()).includes(wording('权限被拒绝','Permission denied')));
+  assert.ok((await frame.locator('#status').textContent()).includes('Permission denied'));
   await switchLocale(otherLocale);
   assert.ok((await frame.locator('#status').textContent()).includes('Permission denied'));
   await switchLocale(locale);

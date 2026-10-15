@@ -1,125 +1,88 @@
-# Pixel Image Viewer / 点对点图片浏览
+# Pixel Image Viewer
 
-手机通过编号槽位保存多张本地图片，共用一个单绿预览框，选中槽位后点击发送，通过 App 蓝牙消息通道显示到眼镜。每次发送一张，眼镜只保留当前画面。双端插件均名为 **Pixel Image Viewer**。
+Select local images on the phone, keep them in numbered slots, and send the selected image to the glasses through the App's Bluetooth messaging bridge. All slots share one green preview. The glasses retain only the currently received frame. Both plugins are named **Pixel Image Viewer**.
 
-## 0.1.13 进度条填满可用宽度
+## Usage
 
-发送时百分比文字按内容占宽，进度条自动填满文字与 Cancel 之间的剩余空间，取消原 18% / 80px 宽度限制。继续使用固定高度单行，不改变槽位和预览的位置。
+1. Import the repository workspace into Desktop Studio and refresh both plugin lists, or import `PhoneSDK/dist/pixel-image-viewer-0.1.13-paired.zip`.
+2. Select **Pixel Image Viewer** on the phone side and verify that Studio selects the matching glasses plugin with a compatible protocol.
+3. Run the pair or export it to the App. Grant the declared file, storage, device information, connection event and messaging permissions.
+4. Select a numbered slot and tap **Choose image**. Use another slot for each additional image. The trailing **+** adds and selects an empty slot.
+5. Select a loaded slot, check its preview, and tap **Send to glasses**. Reaching 100% still requires the glasses to validate the complete frame and acknowledge FrameBuffer submission.
+6. After cancellation, suspension or disconnection, resend the complete image in a new transfer session. A frame received during a call overlay is displayed after that overlay closes.
 
-## 0.1.12 固定单行传输状态
+The phone starts with 10 slots. Loaded slots have a dot; switching slots only changes the preview and never sends automatically. Each loaded slot caches its preview, 105,000-byte GRAY4 frame and LZ4 payload. Switching or resending does not reread, decode or compress the file.
 
-将原文件名行改为预览上方固定 30px 高的一行：空闲显示文件名，传输时显示百分比/编码、短进度条和 Cancel。加载、成功和错误也复用这一行，不在顶部插入新行。状态长文本不换行，完整内容保留 title，错误可在行内横向滚动；Check connection 仍仅在需要恢复时出现在该行。传输前、中、完成及错误时槽位、操作按钮与预览位置保持一致。
+Slot count and file references persist in private plugin storage. On reopening, images are restored sequentially to avoid decoding several large files at once; slot 1 is selected initially. The older single-image setting is restored into slot 1. Full-resolution decoded images are released after preparing the fixed-size frame.
 
-## 0.1.11 单行标题栏
+Replacing an image affects only its selected slot. Cancelling or failing to save keeps the previous image; failing to save a new slot leaves the count unchanged. Slot changes are disabled during initialization, file loading and sending. An old private file is deleted only when no slot references it. Original files on the phone are never modified.
 
-连接状态移到标题和版本号同一行右侧，不再占单独一行。窄屏略缩标题字号，长文本省略以防挤出横向滚动；异常恢复和发送取消按钮仍按需出现。
+## Pixel rules
 
-## 0.1.10 按需显示连接操作
+- Output is exactly **600 × 350**. One decoded source pixel maps to one output pixel; there is no scaling or interpolation.
+- Handle width and height independently: center smaller dimensions on black, and crop larger dimensions starting at coordinate 0.
+- A 100×50 image starts at `(250,150)`; a 900×500 image contributes its top-left 600×350 pixels; an 800×100 image contributes its leftmost 600 columns at vertical offset 125.
+- If padding is odd, the extra pixel goes on the right or bottom.
+- Composite transparency on black, then quantize luminance to GRAY4 with 16 levels. Even x coordinates occupy the high nibble. Each row is 300 bytes; the entire frame is 105,000 bytes.
+- Do not add text, watermarks or other content to the transmitted image. The preview renders the transmitted intensity as `(0, gray × 17, 0)` without converting that green preview back to grayscale.
+- Use native image decoding and orientation metadata without resize parameters. PNG, JPEG, BMP and WebP support depends on the phone's decoder. Invalid, unsupported or excessively large files report an error rather than being silently scaled down. Use lossless PNG when inspecting individual pixels; JPEG itself is lossy.
 
-正常连接且空闲时只显示连接状态，隐藏 Cancel、Check connection 和进度条。发送过程中显示 Cancel 和进度；连接异常、初始化失败或其他错误时保留检查/恢复入口，操作忙碌期间隐藏该入口。成功检查连接后清空重复提示。事件订阅、前台恢复检查及原有不刷新页面的恢复方式保持不变。
+The canvas backing store remains 600×350. Its CSS dimensions account for `devicePixelRatio × visualViewport.scale`: at DPR 3, it occupies 200×116⅔ CSS pixels, corresponding to 600×350 physical pixels. If the container is physically narrower than 600 pixels, horizontal scrolling preserves the pixel mapping.
 
-## 0.1.9 精简界面
+## Interface and language
 
-去掉常驻操作说明、Image slots 标题、绿点/加号说明及 Slot N · Preview 标题，缩小槽位区和预览卡片间距。启动就绪、切换/新增槽位和图片加载成功后清空状态区，不占空行；加载、传输、连接反馈和错误仍按需显示。槽位编号、选中高亮、已加载绿点及无障碍标签保留，发送按钮仍在预览上方。
+The plugin UI is English on every system locale. This includes headings, buttons, accessible labels, progress, help and plugin-defined errors. Filenames, image contents and unknown host diagnostics are preserved. The native file picker follows the system's own language.
 
-## 0.1.8 固定英文界面
+Version 0.1.7 selected text using the WebView's `navigator.language`; Desktop Studio's separate Language setting was not propagated to the phone plugin. Version 0.1.8 made the plugin consistently English without requiring an APK, Studio or glasses update.
 
-按需求统一为一套英文文案。标题、按钮、槽位、无障碍标签、进度、帮助和插件自有错误均固定英文，不读取系统语言，也不依赖 Studio 顶部 Language 设置。0.1.7 读取的是 WebView 的系统语言，而 Desktop Studio 的独立语言设置没有传给手机插件，因而出现 Studio 为英文但插件仍为中文的情况。
+The compact interface places the title, version and connection state on one line. Slot buttons occupy a bounded, scrollable panel, with the **+** button as its final cell. **Choose image** / **Replace image** and **Send to glasses** sit above the preview.
 
-只更新手机插件，无需更新 APK、Studio 或眼镜插件。保留文件名、图片原始内容和未识别的宿主诊断信息；系统文件选择器仍使用系统自身语言。槽位缓存、点对点预览、GRAY4/LZ4 和传输协议不变。
+The existing filename row has a fixed height of 30px. It shows the filename when idle and reuses that space for loading, transfer, completion or error status. While sending, the percentage/encoding label, progress bar and **Cancel** stay on one line; the bar fills all remaining space. These state changes do not move the slots, action buttons or preview. Long messages do not wrap; the full text is available in the title attribute, and errors can scroll horizontally within the row.
 
-浏览器回归使用中文系统环境启动，再改变模拟语言，验证界面和已有状态/权限错误始终为英文，缓存和连接会话不受影响。
+**Cancel** and the progress bar appear only during transfer. **Check connection** appears when recovery is needed. Image details and display help are collapsed by default. Empty slots clear the preview to black and disable sending.
 
-## 0.1.6 紧凑布局
+## Transfer and recovery
 
-界面基础字号改为 13px，标题 16px，辅助文字 11px；减少按钮、卡片和区块间距。选择图片和「发送到眼镜」并排放在预览上方，文件名单行省略并保留完整 title。图片参数和使用说明默认折叠。
+### GRAY4 and LZ4
 
-「＋」作为槽位网格最后一格，点击后新增并选中空槽位。手机每行 6 格，槽位区最高 132px，超出后在区内滚动，新增后滚动到末尾，避免槽位数量增加持续挤下操作和预览区域。图片画布和物理像素换算保持原样，界面字号调整不会缩放图片。
+The phone prepares the entire GRAY4 frame and caches a raw LZ4 block when loading an image. On send, HELLO queries the receiver's decompression capability. Use LZ4 only when supported and smaller than the original; otherwise send raw GRAY4 and report the fallback reason. Compression does not change padding, cropping or pixel values.
 
-浏览器回归覆盖扩展到 40 槽及重启恢复、320/390×640 CSS 像素视口下发送按钮位于预览上方且两者可见、槽位区滚动和页面无横向溢出（DPR=3）。物理宽度不足 600px 时预览仍允许横向滚动，以维持点对点显示。
+The glasses receive the complete payload, decompress it through the Host's `GM_PLUGIN_EXTENSION_LZ4.decompress_safe`, validate the decoded length and FNV-1a hash, then copy the frame into FrameBuffer. They do not decode JPEG/PNG or recalculate pixels. The protocol carries the lengths needed for the [raw LZ4 block format](https://github.com/lz4/lz4/blob/dev/doc/lz4_Block_format.md).
 
-## 0.1.5 图片槽位
+Image details expose the raw and compressed sizes. Completion reports the encoding, transmitted size and elapsed time from BEGIN through the COMMIT acknowledgement; this excludes precomputation and the HELLO exchange. Noise or photographs may not compress well. The sender never selects a compressed payload larger than the raw frame.
 
-默认 10 个编号槽位，选中槽位后加载本地图片；「＋ 添加槽位」新增并选中一个空槽位。绿点表示已加载图片。切换槽位立即从内存恢复单绿预览，点击「发送到眼镜」发送对应槽位；选图和切换本身不会自动发送。空槽位显示黑色预览并禁用发送。仍只显示一个预览框。
+Glasses version 2 supports protocol 1.1 and also accepts older raw transfers. Peak requested heap for LZ4 is `105000 + compressed_bytes`, less than 210,000 bytes before allocator overhead. Compressed input is freed after decoding; only the decoded frame remains. Allocation failure is reported and does not present a partial frame. See the [native receiver documentation](../../../GlassSDK/examples/image_viewer/README.md) for packet fields and lifecycle behavior.
 
-每个已加载槽位缓存 600×350 预览、105,000 B 的 GRAY4 数据和 LZ4 数据；切换和重发不重新读取文件、解码或压缩。原始大图只在加载时解码，不保留全尺寸解码图。槽位数量和文件引用保存到插件私有 storage；重新打开先顺序恢复图片缓存，避免同时解码多张大图，完成后可直接切换。每次打开默认选中槽位 1。旧版单图自动恢复到槽位 1。
+### Connection checks
 
-替换仅影响当前槽位；保存失败或取消选择保留原图，新增槽位保存失败不改变数量。选图、传输及初始化时暂时禁止切换/新增，避免选图或发送结果落入另一槽位。旧文件只在没有槽位引用后清理。沿用眼镜版本 2 和协议 1.1，600×350 点对点、单绿、LZ4 及连接检查行为不变。
+The old 0.1.3 reconnect action called `location.reload()`, which could tear down GeckoView extension ports and crash the Android App. ADB captured `NullPointerException: NativeException NullHandle() [T = mozilla::widget::EventDispatcher]` through `WebExtension.Port.disconnectFromExtension → disconnected → EventDispatcher.shutdownNative`; the App process exited.
 
-推荐导入完整配对包 `PhoneSDK/dist/pixel-image-viewer-0.1.8-paired.zip`，其中含手机 0.1.8、眼镜 `image_viewer.gmp` 和匹配审核附件。不要使用 Web Bridge 作为本插件接收端。
+Starting with 0.1.4, **Check connection** reuses the current page and SDK, queries device state, and subscribes only if the connection subscription is missing. It preserves files, previews and prepared payloads. Initialization retries and browser back/forward cache restoration also reuse the page. Actual page teardown closes the SDK synchronously; host session cleanup releases subscriptions without an asynchronous unsubscribe during unloading.
 
-## 0.1.4 连接按钮崩溃修复
+This removes the plugin's reload trigger; it does not modify GeckoView. The action checks an existing connection and does not replace Bluetooth pairing/connection in the App's device screen.
 
-Android 实机 ADB 在 2026-10-14 20:58:53（Asia/Shanghai）捕获 App 主线程崩溃：`NullPointerException: NativeException NullHandle() [T = mozilla::widget::EventDispatcher]`，调用栈为 `WebExtension.Port.disconnectFromExtension → disconnected → EventDispatcher.shutdownNative`。系统记录为 `APP CRASH(EXCEPTION)`，App 进程随后退出；不是仅插件按钮失去响应。
+### File selection
 
-0.1.3 的「重新连接」实际调用 `location.reload()`，会卸载插件页面及通信端口。0.1.4 将按钮改为「检查连接」：复用现有 SDK/页面，查询连接状态，仅在订阅缺失时补订阅；保留已选图片、预览、GRAY4 和 LZ4 缓存。传输、选图、初始化或检查过程中禁用该按钮，防止重入。初始化失败重试复用原客户端；页面从浏览器缓存返回时也不执行 reload。真正退出页面时同步清理 SDK，不在卸载阶段另发异步取消订阅请求，订阅由宿主会话结束时释放。
+Use the same host-managed `gm.files.pick` / `openRead` path as Novel Reader. The host authorizes the actual API calls; do not disable file selection because `runtime.getCapabilities().methods` is incomplete. Device initialization failure still allows local image selection and preview.
 
-这项修改移除了图片插件的崩溃触发路径，未修改 App 的 GeckoView 实现。按钮只检查连接，不替代 App 设备页面的蓝牙连接操作。眼镜插件仍使用版本 2；LZ4 和点对点显示行为不变。
+An expired read ticket with exactly `INTERNAL_ERROR` and `Host file stream failed: HTTP 404` is retried after 100ms and 300ms, obtaining a fresh stream each time. Other file or permission errors are not retried. The implementation also handles picker suspension/resume, detects image MIME from file signatures, and falls back from ImageBitmap to the ordinary image decoder.
 
-## 0.1.3 整帧 LZ4
+## Packages and pairing
 
-选图时，手机先按原有点对点规则算好整帧 GRAY_4（105,000 字节），再缓存 raw LZ4 block。点击发送，HELLO 查询眼镜解压能力；有能力且压缩数据更小时，传输压缩块，否则发送原始 GRAY_4 并显示原因。预览、裁剪、补黑和单绿亮度不受压缩影响。
+Paths below are relative to the repository root.
 
-眼镜先接收完整压缩数据，通过 Host `GM_PLUGIN_EXTENSION_LZ4.decompress_safe` 解压到 105,000 字节缓冲区；验证解压长度和原始帧 FNV-1a 后，直接复制到 FrameBuffer 并提交。它不解码 JPEG/PNG，也不重新换算像素。压缩采用 [LZ4 raw block 格式](https://github.com/lz4/lz4/blob/dev/doc/lz4_Block_format.md)，长度由本插件协议携带。
-
-界面显示原始/LZ4 字节数、实际采用的编码、实际传输字节数和 BEGIN 至 COMMIT 确认的耗时。LZ4 压缩和 HELLO 握手不计入这项传输耗时。照片或噪声可能无法减小；不会强行发送更大的压缩结果。旧眼镜插件或缺少 Host 解压接口的固件走原始数据回退，页面明确显示原因。
-
-手机 **0.1.3** 与眼镜 **版本 2** 需同时更新，配对协议 **1.1**。眼镜版本 2 仍接收旧版原始帧。使用压缩时，峰值动态内存为 `105000 + 压缩字节数`（小于 210000 字节，另有分配器开销）；解压后立即释放压缩缓冲，只留当前帧。内存不足会报错，不显示部分图片。
-
-本机浏览器 + 原生参考 LZ4 + C FrameBuffer 验证：100×50 居中灰阶图为 620 B，900×500 裁剪灰阶图为 556 B，均从 26 个 CHUNK 降为 1 个，42 万个预览像素及最终帧一致。这是重复测试图的数据量，不代表真实照片或物理蓝牙耗时。原生测试还覆盖多包压缩数据、错误长度、损坏块、校验失败、内存不足、重复 ACK、断线、暂停、超时和来电恢复。
-
-## 0.1.2 单图单绿预览
-
-手机仅保留一个图片框和一组选择/发送按钮。预览按实际发送的 16 级亮度显示为 `(0, gray × 17, 0)`，不会把绿色重新转换为灰度后发送。
-
-画布仍为 600×350 像素，显示尺寸按 `devicePixelRatio × visualViewport.scale` 换算成页面像素。例如 DPR=3 时占 200×116⅔ CSS 像素，对应 600×350 物理像素，避免旧版把画面放大到 1800×1050 后溢出手机。物理宽度不足 600 的容器允许滚动，仍不缩放原图。沿用旧存储键并恢复原来的第一张图片。
-
-## 0.1.1 Android 文件入口修复
-
-实机 ADB 确认 0.1.0 的「选择本地图片」按钮被禁用，页面提示初始化能力检查失败；并未进入系统选图或图片解码。原因是插件要求 `runtime.getCapabilities().methods` 完整包含文件和设备方法，检查不通过便阻止整个初始化。Novel Reader 直接调用已授权的文件 API，没有这项前置门槛。
-
-0.1.1 采用相同方式，由宿主对每次 `files.pick/openRead` 调用实际授权；不再用能力清单阻止本地选图。设备事件订阅/信息查询失败也不阻塞文件预览。沿用原图片扩展名筛选，未把系统选图器过滤误判为本次根因。
-
-另补齐 Novel Reader 已有的临时读取链接 HTTP 404 重试（100/300 ms，每次重新申请，只重试该错误），完善系统选图期间的暂停/返回处理、图片 MIME 和 ImageBitmap 解码回退。页面顶部显示状态和错误，避免错误被两幅 1:1 预览挡在屏幕下方。支持格式和不缩放规则不变。
-
-回归新增：能力清单缺少方法列表、设备初始化失败时仍可选图、系统选择器暂停返回、临时读取链接失效、解码回退、权限错误不重试。
-
-## 像素规则
-
-- 输出严格为 **600 × 350**；一个解码后的图片像素对应一个屏幕像素，绝不缩放或插值。
-- 宽高分别处理：不足的维度居中补黑，超出的维度从坐标 0 开始裁剪。
-- 例如 100×50 放在 `(250,150)`；900×500 取左上角 600×350；800×100 取左侧 600 列，纵向放在 125。
-- 奇数黑边多出的 1 像素放在右侧/底部。
-- 透明图片叠加黑色，手机按亮度量化为 GRAY_4（16 级灰度）。偶数 x 放高半字节，固定 300 字节/行，总计 105,000 字节。
-- 不加文字、水印或其他内容到发送画面。预览将同一份量化结果显示为单绿，600×350 画布按物理像素 1:1 显示，不重采样。
-- 使用浏览器原生图片解码和文件方向信息；不传入任何 resize 参数。支持 PNG、JPEG、BMP、WebP，具体解码能力取决于手机 WebView。图片尺寸没有应用级缩放阈值；极大或损坏文件导致解码/内存不足时显示错误，不静默缩小。检查单像素效果推荐无损 PNG；JPEG 自身有有损压缩。
-
-## 使用
-
-1. 在 Desktop Studio 导入此仓库根目录，刷新手机端和眼镜端列表。
-2. 选择手机端 **Pixel Image Viewer**，确认自动配到同名眼镜插件，协议兼容。
-3. 启动或导出这对插件到 App，授予文件、存储、设备信息、连接事件和消息权限。
-4. 选中一个编号槽位，点击「选择本地图片」，从手机本地文件浏览器选择文件。其他图片放入其他槽位；「＋ 添加槽位」可继续增加。
-5. 切换到需要的槽位，确认预览，点击「发送到眼镜」。进度 100% 后仍会等待眼镜完整校验和 FrameBuffer 提交确认。
-6. 断线、暂停或取消后重新点击发送，会用新会话重传完整图片。来电界面显示期间收到的完整图会等待通话界面结束再显示。
-
-每个槽位的图片和槽位数量保存在插件私有文件目录和 storage，重新打开会恢复。替换成功后清理旧图的 App 私有副本，不改动手机上的原始文件。取消选择保留原图。
-
-## 双端选择表
-
-以下路径均相对仓库根目录：
-
-| 组件 | 名称 / ID | 安装包 |
+| Component | Identity / version | Package |
 | --- | --- | --- |
-| 手机 | Pixel Image Viewer / `com.memomind.example.image-viewer`，0.1.13 | `PhoneSDK/dist/image-viewer-0.1.13.mmpkg` |
-| 眼镜 | Pixel Image Viewer / `com.memomind.example.image-viewer`，2 | `GlassSDK/build-host/.build/image_viewer/image_viewer.gmp` |
-| 协议 | `gm.pixel-image-viewer`，1.1 | 请求 18774 (`0x4956`)，确认 18775 (`0x4957`) |
+| Phone | Pixel Image Viewer / `com.memomind.example.image-viewer`, 0.1.13 | `PhoneSDK/dist/image-viewer-0.1.13.mmpkg` |
+| Glasses | Pixel Image Viewer / `com.memomind.example.image-viewer`, 2 | `GlassSDK/build-host/.build/image_viewer/image_viewer.gmp` |
+| Combined delivery | Both packages and matching review attachments | `PhoneSDK/dist/pixel-image-viewer-0.1.13-paired.zip` |
+| Protocol | `gm.pixel-image-viewer`, 1.1 | Request 18774 (`0x4956`), acknowledgement 18775 (`0x4957`) |
 
-眼镜包需与同目录的 `.review.json`、`.review-source.enc` 一起保留。手动跨机器导入 GMP 时带上 `GlassSDK/examples/image_viewer/manifest.json`，以便读取配对元数据。不要选择默认 Web Bridge；它不处理本插件的图片协议。
+Keep the GMP with its matching `.review.json` and `.review-source.enc`. When manually importing the GMP on another machine, also provide `GlassSDK/examples/image_viewer/manifest.json` for pairing metadata. Do not select the default Web Bridge: it does not implement this plugin's image protocol.
 
-## 构建、测试和预览
+## Build, test and preview
 
-从仓库根目录运行：
+From the repository root:
 
 ```sh
 python3 GlassSDK/build.py build --example image_viewer
@@ -127,31 +90,55 @@ node PhoneSDK/tools/build-mmpkg.mjs PhoneSDK/examples/image-viewer PhoneSDK/dist
 node --test PhoneSDK/tools/test/image-viewer.test.mjs PhoneSDK/tools/test/image-viewer-i18n.test.mjs
 python3 -m unittest discover -s GlassSDK/tests -p test_image_viewer_native.py
 python3 -m unittest discover -s GlassSDK/tests -p test_system_native.py
-python3 .agents/skills/memomind-example-app/scripts/check_pair.py --web PhoneSDK/dist/image-viewer-0.1.13.mmpkg --glass GlassSDK/examples/image_viewer/manifest.json --gmp GlassSDK/build-host/.build/image_viewer/image_viewer.gmp
+python3 .agents/skills/memomind-example-app/scripts/check_pair.py --delivery --web PhoneSDK/dist/image-viewer-0.1.13.mmpkg --glass GlassSDK/examples/image_viewer/manifest.json --gmp GlassSDK/build-host/.build/image_viewer/image_viewer.gmp
 node PhoneSDK/tools/run-browser-studio.mjs --plugin examples/image-viewer
 ```
 
-普通 Browser Studio 可验证文件选择和 UI，但不能执行 GMP。点发送会等待不到配套 ACK；不要据此判断真实眼镜显示成功。
+After exporting a combined ZIP, rerun the pairing check with `--bundle PhoneSDK/dist/pixel-image-viewer-0.1.13-paired.zip` to verify its actual package bytes and review hashes.
 
-可选浏览器回归脚本 `PhoneSDK/tools/verify-image-viewer-browser.mjs` 需要本机 `cc`、参考 liblz4、Playwright 和 Chromium。原生测试同样链接 liblz4，默认 `-llz4`；只有 Linux 运行库时可设 `LZ4_LINK_FLAGS=-l:liblz4.so.1`。通过 `PLAYWRIGHT_MODULE` 指定现有 Playwright 模块路径，`CHROMIUM_EXECUTABLE` 指定浏览器路径，或者使用已安装的 `playwright` 与其浏览器。脚本只访问本机端口 4187，把公开 Browser Studio 的自定义消息接到本机编译的实际 C 接收器，其 Host LZ4 解压调用系统参考库；不改动 SDK 或 Studio 实现。
+Ordinary Browser Studio validates file selection and UI but does not execute GMP code. Sending without a compatible receiver will time out; this does not establish physical glasses behavior.
+
+The optional integration script requires a native C compiler, reference liblz4, Playwright and Chromium:
 
 ```sh
 node PhoneSDK/tools/verify-image-viewer-browser.mjs
 ```
 
-它会生成两张逐像素灰阶 PNG，分别加载到槽位 1、2 并验证 420,000 个单绿预览像素、手机 DPR=3 下完整的 600×350 物理像素、四次发送、最终 FrameBuffer 字节、反复切换不重读文件/不自动发送、扩展到槽位 40、紧凑布局、空槽位黑屏、存储失败保留原图和槽位数量、连接检查不导航/不重读图片/不重复订阅、连续点击、初始化失败恢复、浏览器缓存恢复、宿主重启恢复图片、取消、断线、暂停和权限撤销。临时图片、截图和灰度帧路径会打印在输出中。这是浏览器 + C 模拟宿主集成验证，不是 Desktop Studio/RISC-V 执行或物理蓝牙验证。
+The script connects public Browser Studio messaging to the actual C receiver compiled with a simulated host and reference LZ4. It uses localhost port 4187 and does not modify SDK or Studio implementations. Set `PLAYWRIGHT_MODULE` and `CHROMIUM_EXECUTABLE` to existing installations if they are not discoverable. Native tests link with `-llz4` by default; systems with only the Linux runtime library can use `LZ4_LINK_FLAGS=-l:liblz4.so.1`.
 
-## 修改入口和待验收项
+`IMAGE_VIEWER_LOCALE` controls the test browser's locale (default `zh-CN`). The plugin remains English when the locale changes, including existing status/error messages, while keeping its document, image caches and subscriptions.
 
-- `image.js`：原像素裁剪/补黑、解码、灰度转换。
-- `i18n.js`：统一英文文案和结构化错误。
-- `plugin.js`：多个文件槽位、共享的物理像素预览、持久化、按钮及生命周期。
-- `lz4.js`：整帧 raw block 压缩（复用 life-desk 编码器）。
-- `protocol.js`：压缩协商、分包、ACK、超时重试和传输统计。
-- `GlassSDK/examples/image_viewer/image_viewer.c`：接收校验、FrameBuffer 写入和来电恢复；协议详见该目录 README。
+The integration creates two PNGs, loads them into slots 1 and 2, and checks 420,000 green preview pixels and every final FrameBuffer byte. It covers four LZ4 transfers, cached switching without rereads or automatic sends, 40 slots and restart restoration, empty previews, failed saves, file-ticket recovery, decoder fallback, initialization retry, connection checks without navigation or duplicate subscriptions, picker cancellation, suspension and permission revocation. At 320/390px widths it checks that sending, completion and errors preserve the positions of slots, controls and preview. Artifact paths are printed on completion.
 
-已完成：双端构建、23 项 JS 测试、原生 C 状态机/来电与生命周期回归、浏览器与 C 的像素集成、包配对元数据检查。C 内存/未定义行为检查通过；环境不支持 LeakSanitizer，另有测试断言检查帧内存释放。
+The repetitive test patterns compress from 105,000 bytes to 620 bytes (100×50 centered image) and 556 bytes (900×500 cropped image), reducing 26 raw chunks to one. These are test-pattern sizes, not expected photograph sizes or measured physical Bluetooth throughput.
 
-仍需在可运行的 Desktop Studio 中验证：列表发现新插件、选中手机插件后自动选择正确 GMP、实际运行 GMP 并显示，再导出完整组合 ZIP/QR。本次环境只有 Windows 版 Studio，未运行这些步骤。
+## Verification boundaries
 
-仍需真机验证：0.1.8 固定英文与紧凑布局、多槽位恢复/快速切换和连接检查、Android/iOS 本地文件选择、超大图解码行为、权限弹窗、真实蓝牙吞吐/断线、完整帧和压缩缓冲的堆内存分配、来电覆盖和真实屏幕点对点效果。旧固件若没有系统来电事件扩展，无法主动感知覆盖界面；返回后可手动重发恢复图片。
+Completed local checks include 23 JS tests, native C receive/call/lifecycle tests, browser-to-C pixel integration, and package/pair checks. Native tests exercise multiple compressed chunks, malformed sizes/blocks, hash failures, allocation failure, duplicate acknowledgements, disconnection, suspension, timeout and call restoration. Address/undefined-behavior checks passed in the development environment; LeakSanitizer was unavailable, so allocation-release assertions provide separate coverage.
+
+The browser/C harness is not Desktop Studio's RISC-V runtime or a physical Bluetooth link. Final acceptance still requires Desktop Studio discovery/automatic pairing, GMP execution and combined ZIP/QR installation, plus Android/iOS file selection, large-image decoding, permission prompts, Bluetooth throughput/recovery, glasses heap allocation, call overlays and physical pixel mapping. Older firmware without the system-event extension cannot notify the plugin when a call overlay closes; resend manually when needed.
+
+## Source map
+
+- `image.js`: decoding, original-pixel placement, black padding and GRAY4 conversion.
+- `i18n.js`: English messages and structured errors.
+- `plugin.js`: slots, physical-pixel preview, persistence, controls and lifecycle.
+- `lz4.js`: raw-block encoder adapted from the life-desk example.
+- `protocol.js`: negotiation, packets, acknowledgements, retries and transfer statistics.
+- `GlassSDK/examples/image_viewer/image_viewer.c`: receive validation, FrameBuffer submission and call restoration.
+
+## Release history
+
+- **0.1.13:** Fill the available status-row width with the progress bar.
+- **0.1.12:** Reuse the filename row for fixed-height single-line transfer/status controls.
+- **0.1.11:** Put connection state on the title/version row.
+- **0.1.10:** Show connection recovery and cancellation controls only when needed.
+- **0.1.9:** Remove redundant slot/preview headings and persistent instructions.
+- **0.1.8:** Use a consistently English interface.
+- **0.1.7:** Introduce locale-based messages, superseded by 0.1.8.
+- **0.1.6:** Compact layout with bounded slot scrolling and actions above the preview.
+- **0.1.5:** Add persistent, expandable image slots and cached switching.
+- **0.1.4:** Check connections without reloading the WebView.
+- **0.1.3:** Add cached GRAY4/LZ4 transfer and the version 2 glasses receiver.
+- **0.1.2:** Share one green preview with physical-pixel sizing.
+- **0.1.1:** Use host-authorized file calls and recover expired read tickets.
