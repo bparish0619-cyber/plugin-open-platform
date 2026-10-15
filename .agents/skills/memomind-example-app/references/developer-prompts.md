@@ -8,7 +8,7 @@ Developers do not need to choose the ABI or fill in every protocol field first. 
 
 > Use $memomind-example-app to build focus-timer. Configure the duration on the phone and support start, pause, resume, and reset. Show the remaining time and state on the glasses. Save the selected duration and restore that setting on reopening; background countdown is not required. Use the existing web_bridge and create a new directory while preserving the original examples. Deliver complete source, preview commands, pairing instructions, and an MMPKG. Test pause/resume, completion, and reload.
 
-Expected route: Web starter, state machine and storage, text rendering, subscription/timer cleanup, Browser Studio, then MMPKG. Calculate elapsed time from timestamps rather than treating timer callback counts as an accurate clock. Define paused and non-foreground behavior according to the request.
+Expected route: Web starter, state machine and storage, text rendering, subscription/timer cleanup, Browser Studio, then MMPKG plus the compatible existing Web Bridge GMP/review attachments and delivery preflight. Calculate elapsed time from timestamps rather than treating timer callback counts as an accurate clock. Define paused and non-foreground behavior according to the request.
 
 ## Standalone glasses game
 
@@ -27,6 +27,12 @@ Expected route: dedicated Web/Glass directories, a short message specification, 
 > Use $memomind-example-app to build a TXT reader based on novel-reader. Support only user-selected UTF-8 TXT files, glasses pagination, bookmarks, and reading-position restoration; omit EPUB and illustrations. Implement it in new directories while preserving bounded reads and the file-permission model. Deliver both plugins' source, packages, and verification steps, and identify file-persistence behavior that still requires testing in the App on a physical device.
 
 Expected route: Host files/storage, bounded text windows, glasses layout/page turns, progress and cleanup, then dedicated GMP pairing. A smaller feature scope must not introduce whole-book RAM storage, cached short-lived tickets, or raw file URLs.
+
+## Implicit glasses dependency
+
+> Build a plugin that lets me select a local PNG on my phone and send it to the glasses. Prepare the exact 600x350 GRAY4 pixels on the phone, compress when useful, and display them without resampling through the glasses FrameBuffer.
+
+Expected route: determine whether supported Web Bridge operations cover the implementation. If choosing a new channel/payload, automatically implement both sender and native receiver, set compatible protocol requirements/providers, build both packages, and check the actual combined export. The developer need not add "also create the glasses plugin." A phone file picker plus a default Web Bridge GMP is not a complete custom image application.
 
 ## Continuing after the first delivery
 

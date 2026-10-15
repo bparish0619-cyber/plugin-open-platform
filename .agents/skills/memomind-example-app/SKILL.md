@@ -1,6 +1,6 @@
 ---
 name: memomind-example-app
-description: Build runnable MemoMind plugins or paired applications from developer requirements and existing examples, including example selection, project creation, implementation, pairing, preview, and packaging. Use for timers, games, readers, dashboards, pets, and similar example-based applications.
+description: Build runnable MemoMind plugins or paired applications from developer requirements and existing examples, including automatic glasses-dependency resolution, both required implementations, pairing, preview, and packaging. Use for timers, games, readers, dashboards, pets, and similar example-based applications.
 ---
 
 # From a requirement to a runnable application
@@ -11,12 +11,14 @@ Developers can adapt the timer, game, controller, and reader requests in [sample
 
 ## Starting point and defaults
 
-Translate the request into where the application runs (phone, glasses, or both), its main interactions, data sources, persistence requirements, and observable acceptance criteria. When unspecified, follow the architecture of the closest example, explain the choice, and implement it. Ask only when a missing decision changes the core experience or an external interface is required but unavailable.
+Translate the request into where the application runs (phone, glasses, or both), its main interactions, data sources, persistence requirements, and observable acceptance criteria. Infer glasses dependencies from the requested behavior before choosing a starter; then use the closest compatible example, explain the choice, and implement it. Ask only when a missing decision changes the core experience or an external interface is required but unavailable.
 
 - Independent glasses execution, local games, or efficient native rendering: a Glass plugin.
 - Phone-owned state with text/Canvas rendering and input on the glasses: a Web plugin with the existing `web_bridge`; a new GMP is usually unnecessary.
 - A dedicated state or streaming protocol between the two platforms: a Web plugin paired with a dedicated Glass plugin; define the messages before implementation.
 - Phone-only functionality: a Web plugin with unnecessary device requirements and permissions removed; do not introduce a glasses dependency.
+
+A request such as "select images on the phone and display them on the glasses" already authorizes the necessary companion work for that application. Do not ask whether to add the glasses plugin or stop after the phone UI. Read [dependency resolution](references/paired-app.md#resolve-dependencies-before-generating-code) before generating code whenever the behavior depends on the glasses, even if the developer calls it a "phone plugin". Explicitly phone-only requests, including phone UI prototypes, remain limited to that scope.
 
 Before implementation, state the delivery mode: **phone-only**, **glasses-only**, **Web with existing Web Bridge**, or **custom paired application**. List the required components and the component that owns state/rendering. A request for a complete phone-controlled pet/game/reader normally needs both components unless the existing Web Bridge implements every required operation. An explicit single-platform request stays single-platform; explain any unavailable companion behavior instead of silently expanding it.
 
@@ -25,6 +27,7 @@ For a custom pair, create or locate both implementations, build both packages, v
 For a new application, create a new directory and independent identity while preserving the reference example. For a request to modify an existing example, work in that directory without forcing a copy. To generate a minimal project, run this tool from the repository root:
 
 ```sh
+# Only for a standard-display application whose companion is the existing Web Bridge:
 python3 .agents/skills/memomind-example-app/scripts/create_example.py \
   --kind web --name focus-timer --id com.example.focus-timer --title "Focus Timer"
 # For a native LVGL starter, use glass instead of web and choose its own name and ID.
@@ -44,7 +47,7 @@ Generator regression checks: run `python3 .agents/skills/memomind-example-app/sc
 
 ## Acceptance and handoff
 
-For a custom pair, completion requires both source trees, a built MMPKG and GMP, matching declared protocols/versions, and implemented handlers for the channels used. Run the [pairing preflight](references/paired-app.md#pairing-preflight) against the actual Web package and Glass manifest/GMP. This checks metadata only; verify Studio discovery and automatic matching, codecs, permissions, and runtime behavior separately. Do not complete the task while reporting "Missing protocol", an unhandled custom channel, or a required companion that was never built.
+For every glasses-dependent application, hand over the actual compatible GMP (reused or newly implemented), as well as the Web package when applicable. For a custom pair, completion requires both source trees, a built MMPKG and GMP, matching declared protocols/versions, and implemented handlers for the channels used. Run the [pairing preflight](references/paired-app.md#pairing-preflight) with `--delivery` against the actual Web package and Glass manifest/GMP. If a combined ZIP is produced, check it with `--bundle` before handing it over; intended source paths do not establish which GMP was exported. These checks establish declared compatibility and artifact identity only; verify Studio discovery and automatic matching, codecs, permissions, and runtime behavior separately. Do not complete the task while reporting "Missing protocol", an unhandled custom channel, or a required companion that was never built.
 
 For a standalone Glass program, explicitly instruct the developer to disable/clear the phone component in Studio. Do not pair an arbitrary phone application with it just because both selectors have entries.
 

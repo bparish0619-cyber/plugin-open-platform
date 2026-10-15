@@ -1,5 +1,7 @@
 """Pairing regressions using synthetic manifests/header metadata, not executable GMP fixtures."""
 import copy
+import hashlib
+import warnings
 import json
 from pathlib import Path
 import subprocess
@@ -9,7 +11,7 @@ import unittest
 import zipfile
 
 sys.dont_write_bytecode = True
-from check_pair import HEADER, check_gmp, check_pair, read_manifest
+from check_pair import HEADER, check_gmp, check_pair, read_manifest, check_bundle
 
 WEB = {'id': 'com.example.remote', 'deviceRequirements': {
     'preferredPluginId': 'com.example.pet',
@@ -96,6 +98,108 @@ class PairTests(unittest.TestCase):
             self.assertEqual(result.returncode, 1)
             self.assertIn('Missing protocol gm.example-pet', result.stdout)
 
+
+
+class DeliveryTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.web = self.root / 'app.mmpkg'
+        with zipfile.ZipFile(self.web, 'w') as archive:
+            archive.writestr('manifest.json', json.dumps(WEB))
+        self.glass = self.root / 'glass.json'
+        self.glass.write_text(json.dumps(GLASS), encoding='utf-8')
+        self.gmp = self.root / 'app.gmp'
+        self.gmp.write_bytes(HEADER.pack(b'GMPK', 2, 256, HEADER.size + 4,
+                                        *([0] * 10), 3, b'Example Pet') + b'demo')
+        encrypted = b'encrypted-source-fixture'
+        review = {'format': 'gm-review', 'version': 2,
+                  'gmp': {'sha256': hashlib.sha256(self.gmp.read_bytes()).hexdigest()},
+                  'source': {'sha256': hashlib.sha256(encrypted).hexdigest()}}
+        self.entries = {'app.mmpkg': self.web.read_bytes(), 'app.gmp': self.gmp.read_bytes(),
+                        'review.json': json.dumps(review).encode(), 'source.enc': encrypted}
+        self.bundle = self.root / 'app.zip'
+
+    def write_bundle(self, updates=None):
+        entries = dict(self.entries)
+        entries.update(updates or {})
+        with zipfile.ZipFile(self.bundle, 'w') as archive:
+            for name, data in entries.items():
+                if data is not None:
+                    archive.writestr(name, data)
+
+    def cli(self, *options, web=None, gmp=True):
+        command = [sys.executable, str(Path(__file__).with_name('check_pair.py')),
+                   '--web', str(web or self.web), '--glass', str(self.glass)]
+        if gmp:
+            command += ['--gmp', str(self.gmp)]
+        return subprocess.run(command + list(options), capture_output=True, text=True)
+
+    def test_delivery_rejects_source_only_and_missing_companion(self):
+        source = self.root / 'web.json'
+        source.write_text(json.dumps(WEB), encoding='utf-8')
+        result = self.cli('--delivery', web=source)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('built .mmpkg', result.stderr)
+        result = self.cli('--delivery', gmp=False)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('built companion', result.stderr)
+        self.assertEqual(self.cli('--delivery').returncode, 0)
+
+    def test_delivery_rejects_preferred_identity_without_requirements(self):
+        weak = {'id': 'com.example.phone', 'deviceRequirements': {'preferredPluginId': GLASS['id']}}
+        with zipfile.ZipFile(self.web, 'w') as archive:
+            archive.writestr('manifest.json', json.dumps(weak))
+        result = self.cli('--delivery')
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('preferred ID alone', result.stderr)
+
+    def test_bundle_implies_delivery_and_accepts_exact_pair(self):
+        self.write_bundle()
+        result = self.cli('--bundle', str(self.bundle))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('paired ZIP contains the checked packages', result.stdout)
+        self.assertEqual(self.cli('--bundle', str(self.bundle), gmp=False).returncode, 1)
+
+    def test_bundle_rejects_phone_only_export(self):
+        self.write_bundle({'app.gmp': None})
+        with self.assertRaisesRegex(ValueError, 'one MMPKG and one GMP'):
+            check_bundle(self.bundle, self.web, self.gmp)
+
+    def test_bundle_rejects_other_gmp_even_with_identical_header_identity(self):
+        self.write_bundle({'app.gmp': self.gmp.read_bytes()[:-4] + b'old!'})
+        result = self.cli('--bundle', str(self.bundle))
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('different .gmp', result.stderr)
+
+    def test_bundle_rejects_stale_phone_package(self):
+        self.write_bundle({'app.mmpkg': b'older-phone-package'})
+        with self.assertRaisesRegex(ValueError, 'different .mmpkg'):
+            check_bundle(self.bundle, self.web, self.gmp)
+
+    def test_bundle_rejects_missing_or_mismatched_review_attachments(self):
+        for updates in [{'source.enc': None}, {'review.json': None},
+                        {'source.enc': b'stale-encrypted-source'},
+                        {'review.json': json.dumps({'format': 'gm-review', 'version': 2,
+                                                   'gmp': {'sha256': '0' * 64}}).encode()}]:
+            with self.subTest(updates=updates):
+                self.write_bundle(updates)
+                with self.assertRaises(ValueError):
+                    check_bundle(self.bundle, self.web, self.gmp)
+
+    def test_bundle_rejects_ambiguous_or_nested_entries(self):
+        for updates in [{'other.gmp': b'other'}, {'nested/source.enc': b'other'}]:
+            self.write_bundle(updates)
+            with self.assertRaises(ValueError):
+                check_bundle(self.bundle, self.web, self.gmp)
+        self.write_bundle()
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore', UserWarning)
+            with zipfile.ZipFile(self.bundle, 'a') as archive:
+                archive.writestr('app.gmp', self.gmp.read_bytes())
+        with self.assertRaisesRegex(ValueError, 'unique root-level'):
+            check_bundle(self.bundle, self.web, self.gmp)
 
 if __name__ == '__main__':
     unittest.main()

@@ -5,7 +5,7 @@ description: Develop or fix MemoMind PhoneSDK H5 plugins, the JavaScript Bridge,
 
 # Web plugins and the Bridge
 
-Start with the [PhoneSDK guide](../../../PhoneSDK/README.md) and [capability and permission contract](../../../PhoneSDK/docs/web-plugin/capability-contract.md). Use the [quick start](../../../PhoneSDK/docs/web-plugin/quick-start.md) for layout and run instructions only; its explicitly outdated permission/audio examples are not the current API contract. For a new application, start with the [application skill](../memomind-example-app/SKILL.md). Document paths are relative to this file; npm commands below run from `PhoneSDK/`.
+Start with the [PhoneSDK guide](../../../PhoneSDK/README.md) and [capability and permission contract](../../../PhoneSDK/docs/web-plugin/capability-contract.md). Use the [quick start](../../../PhoneSDK/docs/web-plugin/quick-start.md) for layout and run instructions only; its explicitly outdated permission/audio examples are not the current API contract. For a new application, start with the [application skill](../memomind-example-app/SKILL.md). When requested phone behavior depends on glasses output or replies, resolve and deliver the companion as part of that task; choosing this Web skill does not make the task phone-only. Document paths are relative to this file; npm commands below run from `PhoneSDK/`.
 
 ## Choosing where to work
 

@@ -4,6 +4,23 @@ First check whether standard `gm.display` and `gm.device` APIs can satisfy the r
 
 For a dedicated pair, first define a message table shared by both implementations: direction, channel, version, length, field types and byte order, response/ACK, retries, and state reset. Refer to [fighter-controller/protocol.js](../../../../PhoneSDK/examples/fighter-controller/protocol.js) and the [novel_reader README](../../../../GlassSDK/examples/novel_reader/README.md), adapting only the semantics the task needs.
 
+## Resolve dependencies before generating code
+
+Resolve the requested operations to their actual provider, not just a starter's default manifest:
+
+| Requested behavior | Implementation decision | Required deliverables |
+| --- | --- | --- |
+| Local phone UI/storage only | Phone-only; remove unused device requirements | Web source and MMPKG |
+| Glasses drawing/input fully supported by standard APIs | Reuse the existing Web Bridge after checking its implementation | Web source/MMPKG and the compatible built Web Bridge GMP with review attachments |
+| Custom channels, native state, or decoding/rendering not handled by that bridge | Locate a compatible existing companion or implement a dedicated one automatically | Both implementations, shared protocol, MMPKG and dedicated GMP with review attachments |
+| Independent native glasses behavior | Glasses-only | Glass source and GMP; phone component disabled |
+
+Record the selected mode, both source/build paths where applicable, protocol IDs/versions, and which component handles each cross-device operation. For a custom pair, define the request and response handlers together before implementing the phone sender. Ensure both implementations exist before proceeding to packaging. A stock LVGL starter or default Web Bridge is not a provider for an application-specific channel.
+
+For example, a phone that sends packed GRAY4/LZ4 over a new image channel needs a receiver that validates that exact payload, decompresses it when negotiated, submits the FrameBuffer, and returns the expected ACK. Generating a file picker or declaring a protocol cannot substitute for that receiver. Reuse Web Bridge only if the implementation uses its supported display protocol instead.
+
+Complete the companion work without asking the developer to separately request it. If a user explicitly limits changes to one platform, verify the existing counterpart and report any incompatible dependency without expanding that scope. If the compiler, Studio, or hardware is unavailable, complete the remaining independent work and identify the exact unfinished build or integration step; do not substitute a different GMP or label the application fully verified.
+
 ## Delivery mode and the missing-companion check
 
 Do not infer architecture from which selector happens to be populated in Studio. A standalone Glass application can run with the phone component disabled. A Web application using gm.scene can reuse the existing Web Bridge. A dedicated custom protocol requires a real provider on the glasses and a matching consumer/sender on the phone.
@@ -25,15 +42,19 @@ Audit Bridge calls against permissions as well as channel declarations. For exam
 From the repository root, check the actual package and the manifest belonging to the GMP you intend to select:
 
 ```sh
-python3 .agents/skills/memomind-example-app/scripts/check_pair.py \
+python3 .agents/skills/memomind-example-app/scripts/check_pair.py --delivery \
   --web PhoneSDK/dist/<app>.mmpkg \
   --glass GlassSDK/examples/<app>/manifest.json \
   --gmp GlassSDK/build-host/.build/<app>/<app>.gmp
 ```
 
-Use the actual filename, including a version suffix when applicable. `--web` also accepts a source directory/manifest during development. For delivery, pass the built MMPKG to catch stale packaged requirements. `--gmp` checks file existence and header name/version/ABI against the Glass manifest. It does not prove source freshness, full GMP validity, handler implementation, permission coverage, Studio discovery, automatic selection, or the current Studio selection. Runtime validation remains necessary.
+Use the actual filename, including a version suffix when applicable. `--web` also accepts a source directory/manifest during development. `--delivery` requires a built MMPKG, an existing GMP, and at least one required protocol or plugin identity; source-only or unconstrained checks cannot pass as a delivery preflight. `--gmp` checks file existence and header name/version/ABI against the Glass manifest. It does not prove source freshness, full GMP validity, handler implementation, permission coverage, Studio discovery, automatic selection, or the current Studio selection. Runtime validation remains necessary.
 
 The checker exits unsuccessfully for missing/old protocols, a required plugin mismatch, or mismatched GMP identity metadata. A different `preferredPluginId` alone is advisory when all required protocols are provided. Rebuild after changes; do not delete requirements or falsely advertise protocols to make the check pass.
+
+Before handing over an exported combined ZIP, rerun the same command with `--bundle /path/to/app.zip`. This implies `--delivery` and verifies that the ZIP contains exactly the checked MMPKG and GMP bytes, together with `review.json` and `source.enc` whose recorded hashes match. It rejects a phone-only ZIP, a stale MMPKG, the default Web Bridge in place of a custom receiver, and mismatched review attachments. It does not verify signatures, review approval, source-to-binary reproducibility, or the behavior of the installed application.
+
+Keep the exported pair together for import/QR delivery. After an App install, when device debugging is available, compare its recorded Web/GMP versions and hashes with the checked artifacts before diagnosing protocol failures. Do not assume scanning a new QR replaced both components. If only individual packages are available, provide both exact paths and mark combined export/installation unverified.
 
 Checker regression tests: `python3 .agents/skills/memomind-example-app/scripts/test_check_pair.py`.
 

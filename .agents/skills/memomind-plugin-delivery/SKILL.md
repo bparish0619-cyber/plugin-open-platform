@@ -15,6 +15,8 @@ For new applications, see [running and verification](../memomind-example-app/ref
 - `GlassSDK/`: build one plugin with `python3 build.py build --example <relative-path>`. Use `--example` inside SDK/examples so output reaches the Studio workspace catalog. `--project` writes to a project-local `.build` by default; import that standalone GMP explicitly with its matching manifest beside it. Use `--project` for an independent project; see the [GlassSDK README](../../../GlassSDK/README.md). The first build may download a pinned toolchain; do not replace its version or checksum to bypass failures.
 - `PhoneSDK/`: use `python3 build.py --help` for discovery, build, and output behavior. For a single H5 project, run its own build first, then package it with `npm run pack:plugin -- /absolute/plugin/dist /absolute/release/plugin.mmpkg`. The output must be outside the input directory. For static examples, use their actual deployable directory as input.
 
+For a glasses-dependent Web app, packaging only the MMPKG is incomplete. Follow the [dependency and pairing preflight](../memomind-example-app/references/paired-app.md#pairing-preflight): require `--delivery` for built artifacts and `--bundle` for an exported ZIP. Check the actual export, including its companion and review attachments, before giving the user an import/QR handoff. A successful phone build or matching source manifests cannot prove the export contains the intended GMP.
+
 ## Packages and review attachments
 
 Web packaging rules are in [package format](../../../PhoneSDK/docs/web-plugin/package-format.md). The manifest, entry point, permissions, and file hashes must match the final output. Do not manually edit archives, hashes, or signatures to hide validation failures.
