@@ -20,6 +20,7 @@ public final class GmCodecTest {
         malformedInput();
         reassemblerRecovery();
         describeNamespaces();
+        streamFraming();
         int vectors = args.length > 0 ? referenceVectors(args[0]) : 0;
         System.out.println("PASS: " + checks + " checks, " + vectors + " reference vectors from bluetooth_wire.py");
     }
@@ -111,6 +112,60 @@ public final class GmCodecTest {
         expect(GmCodec.describe(plugin).equals("INT8 7 (GM_PLUGIN_ESTATE); INT32 0"), "plugin namespace");
         GmCodec.Message info = new GmCodec.Message(1, 1, 2, GmCodec.string("{\"pver\":1}"));
         expect(GmCodec.describe(info).equals("STRING {\"pver\":1}"), "STRING JSON");
+    }
+
+    /** Classic SPP delivers a byte stream; StreamFramer must recover physical frames. */
+    private static void streamFraming() {
+        byte[] heartbeat = GmCodec.frames(1, 1, 1, GmCodec.tlv(GmCodec.TLV_STATUS, new byte[] {0}), 512).get(0);
+        byte[] body = GmCodec.applicationBody(2, repeat((byte) 'C', 600));
+        List<byte[]> big = GmCodec.frames(2, 15, 41, body, 512);
+        byte[] empty = GmCodec.frames(3, 15, 40, new byte[0], 512).get(0);
+        byte[] stream = GmCodec.concat(heartbeat, big.get(0), big.get(1), empty);
+
+        // Every split point, one byte at a time, and the whole stream at once.
+        for (int chunk : new int[] {1, 7, 100, stream.length}) {
+            GmCodec.StreamFramer framer = new GmCodec.StreamFramer();
+            List<byte[]> out = new ArrayList<byte[]>();
+            for (int i = 0; i < stream.length; i += chunk) {
+                out.addAll(framer.accept(Arrays.copyOfRange(stream, i, Math.min(stream.length, i + chunk))));
+            }
+            expect(out.size() == 4, "four frames at chunk " + chunk);
+            expect(Arrays.equals(out.get(0), heartbeat) && Arrays.equals(out.get(1), big.get(0))
+                    && Arrays.equals(out.get(2), big.get(1)) && Arrays.equals(out.get(3), empty), "frames intact");
+            expect(framer.takeDropped() == 0, "nothing dropped at chunk " + chunk);
+            List<byte[]> pair = new ArrayList<byte[]>();
+            pair.add(out.get(1));
+            pair.add(out.get(2));
+            expect(Arrays.equals(GmCodec.reassemble(pair), body), "stream frames reassemble");
+        }
+
+        // Garbage before a frame (or an unknown outer envelope) is skipped and counted.
+        GmCodec.StreamFramer framer = new GmCodec.StreamFramer();
+        List<byte[]> out = framer.accept(GmCodec.concat(new byte[] {0x00, 0x55, 0x00, 0x00}, heartbeat));
+        expect(out.size() == 1 && Arrays.equals(out.get(0), heartbeat), "resync after garbage");
+        expect(framer.takeDropped() == 4, "garbage bytes counted");
+        expect(framer.takeDropped() == 0, "dropped count resets");
+
+        // A false header announcing a long frame stalls only until enough bytes
+        // arrive to fail its checksum; then every real frame is recovered.
+        framer = new GmCodec.StreamFramer();
+        out = framer.accept(new byte[] {(byte) 0xFA, 0x00, (byte) 0xFA, 0x00});
+        expect(out.isEmpty(), "false header waits");
+        for (int i = 0; i < 40; i++) out.addAll(framer.accept(heartbeat));
+        expect(out.size() == 40, "all frames recovered after false header: " + out.size());
+        expect(framer.takeDropped() == 4, "false header bytes counted");
+
+        // A corrupted checksum is dropped; the next good frame still parses.
+        byte[] bad = heartbeat.clone();
+        bad[bad.length - 1] ^= 1;
+        out = framer.accept(GmCodec.concat(bad, heartbeat));
+        expect(out.size() == 1 && Arrays.equals(out.get(0), heartbeat), "skip corrupted frame");
+        expect(framer.takeDropped() > 0, "corruption counted");
+
+        // A partial frame waits for more bytes; reset() discards it.
+        expect(framer.accept(Arrays.copyOfRange(heartbeat, 0, 5)).isEmpty(), "partial frame pending");
+        framer.reset();
+        expect(framer.accept(heartbeat).size() == 1, "reset clears partial frame");
     }
 
     private static int referenceVectors(String path) throws Exception {

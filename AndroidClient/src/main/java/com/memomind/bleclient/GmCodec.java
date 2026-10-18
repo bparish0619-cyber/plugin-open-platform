@@ -220,6 +220,100 @@ public final class GmCodec {
     }
 
     /**
+     * Splits a byte stream (Classic SPP) into complete physical frames.
+     *
+     * <p>Unlike BLE, where each notification is one frame, a stream read may
+     * hold part of a frame or several frames. The header carries only the
+     * logical length, so the physical length is derived the way the sender
+     * fragments: every frame but the last carries 503 body bytes (512-byte
+     * ceiling), the last carries the remainder. Bytes that do not form a
+     * checksummed frame are skipped one at a time and counted, so the parser
+     * resynchronizes after noise or an unexpected outer envelope. After a
+     * skip, only a first-frame head (0xFA) can restart parsing: a stray byte
+     * that merely looks like a continuation head would otherwise announce a
+     * 512-byte frame and stall delivery until that much data arrived.
+     */
+    public static final class StreamFramer {
+        private static final int MAX_BODY = MAX_FRAME - ENVELOPE;
+        private byte[] buffer = new byte[0];
+        private int dropped;
+        /** True while the previous byte ended an accepted frame (or at stream start). */
+        private boolean synced = true;
+
+        /** Appends data and returns every complete frame now available. */
+        public List<byte[]> accept(byte[] data) {
+            byte[] joined = new byte[buffer.length + data.length];
+            System.arraycopy(buffer, 0, joined, 0, buffer.length);
+            System.arraycopy(data, 0, joined, buffer.length, data.length);
+            List<byte[]> frames = new ArrayList<byte[]>();
+            int pos = 0;
+            while (joined.length - pos >= ENVELOPE) {
+                int length = candidateLength(joined, pos, synced);
+                if (length < 0) {
+                    pos++;
+                    dropped++;
+                    synced = false;
+                    continue;
+                }
+                if (joined.length - pos < length) break;  // wait for the rest
+                if (checksum(joined, pos, length - 2) != u16(joined, pos + length - 2)) {
+                    pos++;
+                    dropped++;
+                    synced = false;
+                    continue;
+                }
+                synced = true;
+                byte[] frame = new byte[length];
+                System.arraycopy(joined, pos, frame, 0, length);
+                frames.add(frame);
+                pos += length;
+            }
+            buffer = new byte[joined.length - pos];
+            System.arraycopy(joined, pos, buffer, 0, buffer.length);
+            return frames;
+        }
+
+        /** Physical length of a plausible frame starting at pos, or -1. */
+        private static int candidateLength(byte[] data, int pos, boolean synced) {
+            int head = data[pos] & 0xFF;
+            int index;
+            if (head == FIRST_HEAD) {
+                index = 0;
+            } else if (synced && head >= 1 && head <= MAX_FRAMES) {
+                index = head;
+            } else {
+                return -1;
+            }
+            int logical = u24(data, pos + 1);
+            if (logical < ENVELOPE || logical > MAX_LOGICAL) return -1;
+            int remaining = logical - ENVELOPE - index * MAX_BODY;
+            if (remaining < 0 || (remaining == 0 && index > 0)) return -1;
+            return ENVELOPE + Math.min(MAX_BODY, remaining);
+        }
+
+        /** Returns and clears the number of bytes skipped since the last call. */
+        public int takeDropped() {
+            int count = dropped;
+            dropped = 0;
+            return count;
+        }
+
+        /** Discards buffered partial data; call on disconnect. */
+        public void reset() {
+            buffer = new byte[0];
+            dropped = 0;
+            synced = true;
+        }
+    }
+
+    /** Additive sum of length bytes starting at offset, modulo 65536. */
+    static int checksum(byte[] data, int offset, int length) {
+        int sum = 0;
+        for (int i = offset; i < offset + length; i++) sum += data[i] & 0xFF;
+        return sum & 0xFFFF;
+    }
+
+    /**
      * Reassembles ordered physical frames into logical messages. A new first
      * frame replaces an incomplete message. Call reset() on disconnect.
      */

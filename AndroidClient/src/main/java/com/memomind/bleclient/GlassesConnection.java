@@ -7,22 +7,34 @@ import android.bluetooth.BluetoothGattCharacteristic;
 import android.bluetooth.BluetoothGattDescriptor;
 import android.bluetooth.BluetoothGattService;
 import android.bluetooth.BluetoothProfile;
+import android.bluetooth.BluetoothSocket;
 import android.content.Context;
 import android.os.Handler;
 import android.os.HandlerThread;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.ArrayDeque;
+import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 
 /**
- * Phone-facing GM command link over BLE GATT (BLUETOOTH_DEVELOPER_GUIDE.md).
- *
- * Discovers the service containing 0x2021/0x2022, subscribes to the uplink
- * before writing, writes one complete GM frame per characteristic write within
- * the negotiated MTU, waits for the empty flow-control response between
- * fragments, and serializes requests so messages never interleave. All state
- * is confined to one handler thread.
+ * Phone-facing GM command link (BLUETOOTH_DEVELOPER_GUIDE.md) over one of two
+ * transports, chosen by the device's Bluetooth type:
+ * <ul>
+ *   <li><b>Classic SPP</b> for Classic-only devices: an RFCOMM byte stream to
+ *       the GM command service 0x7033 (legacy fallback 0x1101), the transport
+ *       the official App prefers. Frames are recovered with
+ *       {@link GmCodec.StreamFramer}.</li>
+ *   <li><b>BLE GATT</b> otherwise: discovers the service containing
+ *       0x2021/0x2022, subscribes to the uplink before writing, and writes one
+ *       complete GM frame per characteristic write within the negotiated MTU.</li>
+ * </ul>
+ * Both share the request state machine: requests are serialized so messages
+ * never interleave, and fragments wait for the empty flow-control response.
+ * All state is confined to one handler thread.
  */
 public final class GlassesConnection {
     /** GM command downlink: phone writes complete GM frames here. */
@@ -31,6 +43,10 @@ public final class GlassesConnection {
     public static final UUID UPLINK = uuid16(0x2022);
     /** Client Characteristic Configuration Descriptor that enables notifications. */
     public static final UUID CCCD = uuid16(0x2902);
+    /** Classic SPP (RFCOMM) GM command service, preferred by the official App. */
+    public static final UUID SPP_COMMAND = uuid16(0x7033);
+    /** Generic Serial Port Profile UUID; the App's legacy command fallback. */
+    public static final UUID SPP_LEGACY = uuid16(0x1101);
 
     /** Per-step wait for a write callback or response before failing the request. */
     static final long TIMEOUT_MS = 5000;
@@ -92,10 +108,16 @@ public final class GlassesConnection {
     private final Handler handler;
     private final ArrayDeque<Request> queue = new ArrayDeque<Request>();
     private final GmCodec.Reassembler reassembler = new GmCodec.Reassembler();
+    private final GmCodec.StreamFramer framer = new GmCodec.StreamFramer();
 
     // All fields below are touched only on the handler thread.
     private BluetoothGatt gatt;
     private BluetoothGattCharacteristic downlink;
+    /** Open Classic SPP socket, or null when using BLE or disconnected. */
+    private BluetoothSocket socket;
+    private OutputStream socketOut;
+    /** Bumped on every connect/close so threads from an old link are ignored. */
+    private int linkGeneration;
     /** Negotiated ATT MTU; 23 is the Bluetooth default before negotiation. */
     private int mtu = 23;
     /** True once the uplink CCCD write succeeded; requests wait for it. */
@@ -119,30 +141,177 @@ public final class GlassesConnection {
     }
 
     /**
-     * Opens a GATT client to the device. autoConnect=false gives a direct,
-     * fast attempt; if the official App already holds a link, Android shares it.
+     * Connects using the transport the device supports: Classic SPP for
+     * Classic-only devices (an LE connection to a Classic address can only
+     * time out), BLE GATT for everything else.
      */
     public void connect(final BluetoothDevice device) {
         handler.post(new Runnable() {
             public void run() {
-                closeGatt("reconnecting");
-                listener.onState("Connecting to " + device.getAddress(), false);
+                closeLink("reconnecting");
+                int type;
                 try {
-                    gatt = device.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE);
+                    type = device.getType();
                 } catch (SecurityException error) {
                     listener.onState("Bluetooth permission denied", false);
                     return;
                 }
-                if (gatt == null) listener.onState("Connection could not start", false);
+                if (type == BluetoothDevice.DEVICE_TYPE_CLASSIC) {
+                    connectSpp(device);
+                } else {
+                    connectGatt(device);
+                }
             }
         });
+    }
+
+    /**
+     * BLE: autoConnect=false gives a direct, fast attempt; if the official App
+     * already holds an LE link, Android shares it.
+     */
+    private void connectGatt(BluetoothDevice device) {
+        listener.onState("Connecting to " + device.getAddress() + " (BLE)", false);
+        try {
+            gatt = device.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE);
+        } catch (SecurityException error) {
+            listener.onState("Bluetooth permission denied", false);
+            return;
+        }
+        if (gatt == null) listener.onState("Connection could not start", false);
+    }
+
+    /**
+     * Classic: opens an RFCOMM socket to the GM command service on a worker
+     * thread (connect blocks for up to ~12 s), trying 0x7033 then 0x1101.
+     * The glasses accept one command connection, so this fails while the
+     * official App holds it.
+     */
+    private void connectSpp(final BluetoothDevice device) {
+        final int generation = linkGeneration;
+        listener.onState("Connecting to " + device.getAddress() + " (Classic SPP)", false);
+        new Thread(new Runnable() {
+            public void run() {
+                String failures = "";
+                for (UUID uuid : new UUID[] {SPP_COMMAND, SPP_LEGACY}) {
+                    BluetoothSocket candidate = null;
+                    try {
+                        candidate = device.createRfcommSocketToServiceRecord(uuid);
+                        candidate.connect();
+                        onSppConnected(generation, candidate, uuid);
+                        return;
+                    } catch (IOException | SecurityException error) {
+                        failures += " " + uuid.toString().substring(4, 8) + ": " + error.getMessage() + ";";
+                        closeQuietly(candidate);
+                    }
+                }
+                final String detail = failures;
+                handler.post(new Runnable() {
+                    public void run() {
+                        if (generation != linkGeneration) return;
+                        listener.onLog("SPP connect failed:" + detail);
+                        listener.onState("Could not open the glasses' command channel. Force-stop the MemoMind App "
+                                + "(it holds the channel while connected), then tap the glasses again.", false);
+                    }
+                });
+            }
+        }, "gm-spp-connect").start();
+    }
+
+    /** Worker thread: hands the connected socket to the handler thread, or closes it if stale. */
+    private void onSppConnected(final int generation, final BluetoothSocket connected, final UUID uuid) {
+        handler.post(new Runnable() {
+            public void run() {
+                if (generation != linkGeneration) {
+                    closeQuietly(connected);
+                    return;
+                }
+                try {
+                    socketOut = connected.getOutputStream();
+                    startReader(generation, connected.getInputStream());
+                } catch (IOException error) {
+                    closeQuietly(connected);
+                    listener.onState("SPP stream error: " + error.getMessage(), false);
+                    return;
+                }
+                socket = connected;
+                ready = true;
+                listener.onLog("SPP connected to service " + uuid);
+                listener.onState("Ready (Classic SPP)", true);
+                startNext();
+            }
+        });
+    }
+
+    /**
+     * Reader thread: blocks on the socket and posts each chunk to the handler
+     * thread, where the framer splits it into frames. Ends when the socket closes.
+     */
+    private void startReader(final int generation, final InputStream in) {
+        new Thread(new Runnable() {
+            public void run() {
+                byte[] buffer = new byte[1024];
+                try {
+                    while (true) {
+                        int count = in.read(buffer);
+                        if (count < 0) break;
+                        final byte[] chunk = Arrays.copyOf(buffer, count);
+                        handler.post(new Runnable() {
+                            public void run() {
+                                if (generation == linkGeneration) onStreamData(chunk);
+                            }
+                        });
+                    }
+                } catch (IOException ignored) {
+                    // Socket closed or link lost; handled below.
+                }
+                handler.post(new Runnable() {
+                    public void run() {
+                        if (generation != linkGeneration) return;
+                        closeLink("link lost");
+                        listener.onState("Disconnected (Classic link closed)", false);
+                    }
+                });
+            }
+        }, "gm-spp-reader").start();
+    }
+
+    /** Splits stream bytes into frames and feeds them to the shared uplink path. */
+    private void onStreamData(byte[] chunk) {
+        List<byte[]> frames = framer.accept(chunk);
+        int dropped = framer.takeDropped();
+        if (dropped > 0) {
+            listener.onLog("RX skipped " + dropped + " bytes not forming a GM frame; chunk: "
+                    + GmCodec.hex(Arrays.copyOf(chunk, Math.min(chunk.length, 64))));
+        }
+        for (byte[] frame : frames) onUplinkFrame(frame);
+    }
+
+    /** Reassembles one physical uplink frame (BLE notification or SPP frame). */
+    private void onUplinkFrame(byte[] frame) {
+        GmCodec.Message message;
+        try {
+            message = reassembler.accept(frame);
+        } catch (IllegalArgumentException error) {
+            listener.onLog("RX dropped (" + error.getMessage() + "): " + GmCodec.hex(frame));
+            return;
+        }
+        if (message != null) onMessage(message);
+    }
+
+    private static void closeQuietly(BluetoothSocket target) {
+        if (target == null) return;
+        try {
+            target.close();
+        } catch (IOException ignored) {
+            // Already closed.
+        }
     }
 
     /** Closes the link and fails any queued requests. */
     public void disconnect() {
         handler.post(new Runnable() {
             public void run() {
-                closeGatt("disconnected by user");
+                closeLink("disconnected by user");
                 listener.onState("Disconnected", false);
             }
         });
@@ -176,8 +345,9 @@ public final class GlassesConnection {
         Request request = queue.poll();
         request.event = nextEvent;
         nextEvent = nextEvent == 0xFF ? 1 : nextEvent + 1;
-        // ATT value limit is MTU - 3 (opcode + handle); GM frames never exceed 512 bytes.
-        int frameLimit = Math.min(GmCodec.MAX_FRAME, mtu - 3);
+        // SPP carries full 512-byte frames. On BLE the ATT value limit is MTU - 3
+        // (opcode + handle); GM frames never exceed 512 bytes.
+        int frameLimit = socket != null ? GmCodec.MAX_FRAME : Math.min(GmCodec.MAX_FRAME, mtu - 3);
         try {
             request.frames = GmCodec.frames(request.event, request.service, request.command, request.body, frameLimit);
         } catch (IllegalArgumentException error) {
@@ -192,8 +362,9 @@ public final class GlassesConnection {
     }
 
     /**
-     * Writes frames[index] with Write With Response. The pre-API-33 write call
-     * is used because the app compiles against API 23; it remains supported.
+     * Writes frames[index]. SPP: a blocking stream write, complete when it
+     * returns. BLE: Write With Response; the pre-API-33 write call is used
+     * because the app compiles against API 23, and it remains supported.
      */
     @SuppressWarnings("deprecation")
     private void writeFrame() {
@@ -204,6 +375,17 @@ public final class GlassesConnection {
         handler.removeCallbacks(timeout);
         handler.postDelayed(timeout, TIMEOUT_MS);
         listener.onLog("  > " + GmCodec.hex(frame));
+        if (socket != null) {
+            try {
+                socketOut.write(frame);
+                socketOut.flush();
+            } catch (IOException error) {
+                finish("SPP write failed: " + error.getMessage());
+                return;
+            }
+            onFrameWritten(BluetoothGatt.GATT_SUCCESS);
+            return;
+        }
         boolean started;
         try {
             downlink.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);
@@ -215,7 +397,7 @@ public final class GlassesConnection {
         if (!started) finish("characteristic write could not start");
     }
 
-    /** ATT write callback; this is link-level completion, not a GM business ACK. */
+    /** Write completion (ATT callback or SPP write); link-level only, not a GM business ACK. */
     private void onFrameWritten(int status) {
         Request request = current;
         if (request == null) return;
@@ -280,10 +462,12 @@ public final class GlassesConnection {
         startNext();
     }
 
-    /** Tears down the link and every piece of per-connection state. */
-    private void closeGatt(String reason) {
+    /** Tears down the link (either transport) and every piece of per-connection state. */
+    private void closeLink(String reason) {
         ready = false;
+        linkGeneration++;
         reassembler.reset();
+        framer.reset();
         handler.removeCallbacks(timeout);
         if (current != null) {
             Request request = current;
@@ -293,6 +477,10 @@ public final class GlassesConnection {
         while (!queue.isEmpty()) queue.poll().callback.onError(reason);
         downlink = null;
         mtu = 23;
+        // Closing the socket also unblocks and ends the reader thread.
+        closeQuietly(socket);
+        socket = null;
+        socketOut = null;
         if (gatt != null) {
             try {
                 gatt.disconnect();
@@ -328,7 +516,7 @@ public final class GlassesConnection {
             }
         }
         if (down == null) {
-            closeGatt("unsupported device");
+            closeLink("unsupported device");
             listener.onState("Unsupported: no service with 0x2021/0x2022 characteristics", false);
             return;
         }
@@ -336,7 +524,7 @@ public final class GlassesConnection {
         BluetoothGattDescriptor cccd = up.getDescriptor(CCCD);
         if ((props & (BluetoothGattCharacteristic.PROPERTY_NOTIFY | BluetoothGattCharacteristic.PROPERTY_INDICATE)) == 0
                 || cccd == null) {
-            closeGatt("unsupported device");
+            closeLink("unsupported device");
             listener.onState("Unsupported: 0x2022 has no notify/CCCD", false);
             return;
         }
@@ -352,7 +540,7 @@ public final class GlassesConnection {
             ok = false;
         }
         if (!ok) {
-            closeGatt("subscribe failed");
+            closeLink("subscribe failed");
             listener.onState("Could not subscribe to 0x2022", false);
             return;
         }
@@ -379,11 +567,11 @@ public final class GlassesConnection {
                             requested = false;
                         }
                         if (!requested) {
-                            closeGatt("setup failed");
+                            closeLink("setup failed");
                             listener.onState("Setup failed", false);
                         }
                     } else {
-                        closeGatt("link lost");
+                        closeLink("link lost");
                         listener.onState("Disconnected (" + gattStatus(status) + ")", false);
                     }
                 }
@@ -405,7 +593,7 @@ public final class GlassesConnection {
                         ok = false;
                     }
                     if (!ok) {
-                        closeGatt("discovery failed");
+                        closeLink("discovery failed");
                         listener.onState("Service discovery failed", false);
                     }
                 }
@@ -418,7 +606,7 @@ public final class GlassesConnection {
                 public void run() {
                     if (!isCurrent(g)) return;
                     if (status != BluetoothGatt.GATT_SUCCESS) {
-                        closeGatt("discovery failed");
+                        closeLink("discovery failed");
                         listener.onState("Service discovery failed (" + status + ")", false);
                         return;
                     }
@@ -433,7 +621,7 @@ public final class GlassesConnection {
                 public void run() {
                     if (!isCurrent(g) || ready || downlink == null) return;
                     if (status != BluetoothGatt.GATT_SUCCESS) {
-                        closeGatt("subscribe failed");
+                        closeLink("subscribe failed");
                         listener.onState("CCCD write failed (" + status + ")", false);
                         return;
                     }
@@ -473,15 +661,8 @@ public final class GlassesConnection {
             final byte[] copy = value == null ? new byte[0] : value.clone();
             handler.post(new Runnable() {
                 public void run() {
-                    if (!isCurrent(g)) return;
-                    GmCodec.Message message;
-                    try {
-                        message = reassembler.accept(copy);
-                    } catch (IllegalArgumentException error) {
-                        listener.onLog("RX dropped (" + error.getMessage() + "): " + GmCodec.hex(copy));
-                        return;
-                    }
-                    if (message != null) onMessage(message);
+                    // On BLE each notification is exactly one physical frame.
+                    if (isCurrent(g)) onUplinkFrame(copy);
                 }
             });
         }
@@ -495,6 +676,7 @@ public final class GlassesConnection {
             case 19: return "status 19: glasses closed the link";
             case 22: return "status 22: phone closed the link";
             case 133: return "status 133: glasses not reachable; wake them or keep them near the phone";
+            case 147: return "status 147: connection timeout; no BLE answer at this address";
             default: return "GATT status " + status;
         }
     }

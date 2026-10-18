@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.0 - 2026-10-18
+
+### Fixed: "Disconnected (GATT status 147)" with Classic-only glasses
+- Glasses that pair as Classic-only (for example MemoMind One) were connected
+  over BLE, which can only time out (status 147). Classic-only devices now
+  connect over Classic SPP to the GM command service `0x7033` (fallback
+  `0x1101`), the transport the official App uses. BLE devices are unchanged.
+- SPP is a byte stream, so a new stream framer recovers GM frames across read
+  boundaries and resynchronizes after noise; skipped bytes are logged in hex.
+- If the channel cannot be opened, the app explains that the official App
+  holds it while connected and must be force-stopped first.
+- Status 147 is explained in the connection message.
+
 ## 0.2.1 - 2026-10-18
 
 - App icon: smart glasses with HUD lines on a deep-blue background. Adaptive
