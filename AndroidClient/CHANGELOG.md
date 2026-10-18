@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1 - 2026-10-18
+
+- App icon: smart glasses with HUD lines on a deep-blue background. Adaptive
+  icon on Android 8+ (fits every launcher mask, with a monochrome layer for
+  Android 13 themed icons) and a round vector icon on Android 6-7.
+
 ## 0.2.0 - 2026-10-18
 
 ### Fixed: glasses missing from the device list

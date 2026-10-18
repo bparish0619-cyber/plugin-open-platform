@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 6-7 fallback: the visible 72x72 centre of the adaptive icon on a
+     round background. Keep the glasses paths in sync with ic_launcher_foreground. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="72"
+    android:viewportHeight="72">
+    <path
+        android:fillColor="@color/ic_launcher_background"
+        android:pathData="M36,0 a36,36 0 1 1 0,72 a36,36 0 1 1 0,-72 z" />
+    <group android:translateX="-18" android:translateY="-18">
+        <!-- Scaled to 80% so the temples clear circular masks. -->
+        <group android:pivotX="54" android:pivotY="54" android:scaleX="0.8" android:scaleY="0.8">
+            <!-- Lenses: rounded rectangles 26 wide, 20 tall. -->
+            <path
+                android:strokeColor="#FFFFFF"
+                android:strokeWidth="4"
+                android:pathData="M30,44 h14 a6,6 0 0 1 6,6 v8 a6,6 0 0 1 -6,6 h-14 a6,6 0 0 1 -6,-6 v-8 a6,6 0 0 1 6,-6 z
+                    M64,44 h14 a6,6 0 0 1 6,6 v8 a6,6 0 0 1 -6,6 h-14 a6,6 0 0 1 -6,-6 v-8 a6,6 0 0 1 6,-6 z" />
+            <!-- Bridge and temple stubs. -->
+            <path
+                android:strokeColor="#FFFFFF"
+                android:strokeWidth="4"
+                android:strokeLineCap="round"
+                android:pathData="M50,51 q4,-5 8,0 M24,49 l-2,-3 M84,49 l2,-3" />
+            <!-- HUD text lines shown in the right lens. -->
+            <path
+                android:strokeColor="@color/ic_launcher_hud"
+                android:strokeWidth="3"
+                android:strokeLineCap="round"
+                android:pathData="M64,51 h12 M64,57 h7" />
+        </group>
+    </group>
+</vector>

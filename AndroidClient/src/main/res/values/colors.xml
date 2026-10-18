@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Launcher icon palette. -->
+    <color name="ic_launcher_background">#1D3557</color>
+    <color name="ic_launcher_hud">#4FD1C5</color>
+</resources>
