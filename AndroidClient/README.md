@@ -19,7 +19,7 @@ Download `memomind-ble-client-<version>.apk` from the repository's
 phone, allowing installation from unknown sources. Or, with USB debugging:
 
 ```sh
-adb install -r memomind-ble-client-0.2.0.apk
+adb install -r memomind-ble-client-0.2.1.apk
 ```
 
 Requires Android 6.0 (API 23) or later with Bluetooth LE. Releases signed with
@@ -131,7 +131,7 @@ section, and merge. Then either open **Actions > Android client release > Run
 workflow** on `main` (the workflow creates the tag), or push the tag yourself:
 
 ```sh
-git tag android-client-v0.2.0 origin/main && git push origin android-client-v0.2.0
+git tag android-client-v0.2.1 origin/main && git push origin android-client-v0.2.1
 ```
 
 For installable upgrades across releases, add a stable signing key as
@@ -146,6 +146,7 @@ Without them, each build is signed with a fresh debug key.
 | `GmCodec.java` | Framing, fragmentation, checksums, reassembly, TLVs, status namespaces |
 | `GlassesConnection.java` | GATT discovery, subscription, MTU, write pacing, request correlation, disconnect cleanup |
 | `MainActivity.java` | Permissions, device discovery, controls, log |
+| `res/mipmap*/ic_launcher.xml`, `res/drawable/ic_launcher_*.xml` | Vector launcher icon: adaptive (Android 8+, with themed-icon layer) and round fallback (Android 6-7) |
 | `GmCodecTest.java` | Desktop JVM codec tests against `bluetooth_wire.py` vectors |
 
 ## Verification status
