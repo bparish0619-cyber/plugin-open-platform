@@ -522,13 +522,13 @@ public final class MainActivity extends Activity implements GlassesConnection.Li
         }
     }
 
-    /** Classic-only devices cannot use this BLE GATT client. */
+    /** Shows the Bluetooth type; Classic-only devices connect over Classic SPP. */
     private static String typeName(BluetoothDevice device) {
         try {
             switch (device.getType()) {
                 case BluetoothDevice.DEVICE_TYPE_LE: return "BLE";
                 case BluetoothDevice.DEVICE_TYPE_DUAL: return "BLE+Classic";
-                case BluetoothDevice.DEVICE_TYPE_CLASSIC: return "Classic only";
+                case BluetoothDevice.DEVICE_TYPE_CLASSIC: return "Classic (SPP)";
                 default: return "type unknown";
             }
         } catch (SecurityException error) {

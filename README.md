@@ -123,8 +123,9 @@ independent desktop or mobile client, see the [HOGP quick start](GlassSDK/docs/H
 ## Android BLE client
 
 [`AndroidClient/`](AndroidClient/README.md) is a native Android app (Android 6.0+)
-that controls the glasses directly over the public BLE GM command link, without
-the official App:
+that controls the glasses directly over the public GM command protocol, without
+the official App. It uses Classic SPP for glasses that pair as Classic-only (such
+as MemoMind One) and BLE GATT otherwise:
 
 - device heartbeat, information, and status queries;
 - brightness, auto brightness, vertical position, and optical distance;
@@ -132,9 +133,9 @@ the official App:
 
 **Download:** the APK is attached to each `android-client-v*` release on the
 repository's [Releases](../../releases) page. Install it on the phone, tap
-**Find glasses**, and select the glasses. Glasses already connected to the
-MemoMind App appear as `[connected]` or `[paired]` rather than as a scan result;
-see [troubleshooting](AndroidClient/README.md#troubleshooting-glasses-not-in-the-list).
+**Find glasses**, and select the glasses. Force-stop the MemoMind App first if it
+is connected, because the glasses accept one command connection at a time; see
+[troubleshooting](AndroidClient/README.md#troubleshooting-glasses-not-in-the-list).
 
 **Build:** `AndroidClient/build.sh` runs the codec tests and builds a signed APK
 with Ubuntu's Android packages. GitHub Actions builds every pull request and

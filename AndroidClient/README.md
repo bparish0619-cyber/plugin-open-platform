@@ -1,8 +1,10 @@
 # MemoMind BLE Client for Android
 
 A minimal native Android app that talks to MemoMind glasses over the
-**public GM business protocol on BLE GATT**, without the official App or the
-H5 Bridge. It implements the contracts in
+**public GM business protocol**, without the official App or the H5 Bridge.
+It connects over **Classic SPP** to glasses that pair as Classic-only (such as
+MemoMind One) and over **BLE GATT** to glasses that expose the BLE command
+service. It implements the contracts in
 [BLUETOOTH_DEVELOPER_GUIDE.md](../GlassSDK/docs/BLUETOOTH_DEVELOPER_GUIDE.md),
 [PROTOCOL.md](../GlassSDK/docs/PROTOCOL.md),
 [DEVICE_BUSINESS_PROTOCOL.md](../GlassSDK/docs/DEVICE_BUSINESS_PROTOCOL.md), and
@@ -19,7 +21,7 @@ Download `memomind-ble-client-<version>.apk` from the repository's
 phone, allowing installation from unknown sources. Or, with USB debugging:
 
 ```sh
-adb install -r memomind-ble-client-0.2.1.apk
+adb install -r memomind-ble-client-0.3.0.apk
 ```
 
 Requires Android 6.0 (API 23) or later with Bluetooth LE. Releases signed with
@@ -30,7 +32,9 @@ the old one first. See [CHANGELOG.md](CHANGELOG.md) for changes.
 
 1. Tap **Find glasses** and allow **Nearby devices** (Android 12+) or
    **Location** (Android 6-11).
-2. Pick the glasses. Each row shows the name, where it was found, the
+2. **Force-stop the MemoMind App** (Settings > Apps > MemoMind > Force stop)
+   if it is connected: the glasses accept one command connection at a time.
+3. Pick the glasses. Each row shows the name, where it was found, the
    Bluetooth type, the address, and signal strength:
 
    | Tag | Meaning |
@@ -39,9 +43,11 @@ the old one first. See [CHANGELOG.md](CHANGELOG.md) for changes.
    | `[paired]` | Bonded in system Bluetooth settings. Must be powered on and in range. |
    | `[nearby]` | Advertising now (BLE scan result). |
 
-3. The app connects, requests MTU 517, finds the service containing
-   `0x2021`/`0x2022`, and subscribes to `0x2022` before any write. Controls
-   enable when the state reads **Ready**.
+   The Bluetooth type decides the link: `Classic (SPP)` rows open an RFCOMM
+   socket to the GM command service `0x7033` (fallback `0x1101`); `BLE` and
+   `BLE+Classic` rows use GATT (MTU 517, the service containing
+   `0x2021`/`0x2022`, uplink subscribed before any write). Controls enable
+   when the state reads **Ready (Classic SPP)** or **Ready**.
 4. Send commands. The latest response appears under **Device**; every TX/RX
    frame is in the hex **Log** (newest first).
 
@@ -71,13 +77,19 @@ give the counts of connected, paired, and advertising devices.
 | No devices at all on Android 6–11 | Location is off; Android drops all BLE scan results | Turn on Location (the app opens the setting) |
 | "Permission denied" | Nearby devices / Location denied | Settings > Apps > MemoMind BLE Client > Permissions |
 | "Android allows 5 scans per 30 s" | Android throttles repeated scans and returns nothing | Wait for the countdown |
-| Glasses listed as `Classic only` | No BLE on this link | This client needs BLE GATT; the official App may use Classic SPP |
+| "Could not open the glasses' command channel" | The MemoMind App holds the Classic SPP channel | Force-stop the MemoMind App, then tap the glasses again |
+| "status 147" on a BLE row | Connection timeout: nothing answered over BLE at that address | Use the glasses' `Classic (SPP)` row, or wake the glasses and retry |
+| "RX skipped N bytes" in the log | The SPP stream carried bytes that are not GM frames (for example a product transport envelope) | Send the logged hex for analysis |
 | Connected, then "Unsupported: no service with 0x2021/0x2022" | Firmware does not expose the GM GATT service (for example MFi-enabled builds) | Not fixable in the app; record the firmware version |
 | "status 133" on connect | Glasses asleep or out of range | Wake the glasses, keep them close, retry |
 
 ## Protocol behavior
 
-- The control service is found by its characteristics, not a hardcoded service
+- Classic SPP: GM frames up to 512 bytes are written to the RFCOMM stream.
+  Received bytes are split into frames by their header and checksum (a
+  frame's physical length follows from the logical length and its fragment
+  index), so partial and combined reads are handled.
+- BLE: the control service is found by its characteristics, not a hardcoded service
   UUID or handle; the discovered service UUID is logged.
 - Each write is one complete GM physical frame within `min(512, MTU − 3)`
   bytes. Larger messages are fragmented; the app waits for the write callback
@@ -113,8 +125,9 @@ Signing uses `~/.android/debug.keystore` (created if missing) unless `KEYSTORE`,
 
 `build.sh test` checks `GmCodec` against the reference codec: every example in
 [`bluetooth_wire.py`](../GlassSDK/docs/examples/bluetooth_wire.py) at 20, 64, 244, and
-512-byte frame limits, the fragmented 600-byte vector, and malformed-frame,
-TLV, and reassembly-recovery cases.
+512-byte frame limits, the fragmented 600-byte vector, malformed-frame, TLV,
+and reassembly-recovery cases, and SPP stream framing (arbitrary read splits,
+garbage, corrupted frames, false headers).
 
 ## CI and releases
 
@@ -131,7 +144,7 @@ section, and merge. Then either open **Actions > Android client release > Run
 workflow** on `main` (the workflow creates the tag), or push the tag yourself:
 
 ```sh
-git tag android-client-v0.2.1 origin/main && git push origin android-client-v0.2.1
+git tag android-client-v0.3.0 origin/main && git push origin android-client-v0.3.0
 ```
 
 For installable upgrades across releases, add a stable signing key as
@@ -143,18 +156,21 @@ Without them, each build is signed with a fresh debug key.
 
 | File | Responsibility |
 | --- | --- |
-| `GmCodec.java` | Framing, fragmentation, checksums, reassembly, TLVs, status namespaces |
-| `GlassesConnection.java` | GATT discovery, subscription, MTU, write pacing, request correlation, disconnect cleanup |
+| `GmCodec.java` | Framing, fragmentation, checksums, SPP stream framing, reassembly, TLVs, status namespaces |
+| `GlassesConnection.java` | Transport choice, Classic SPP socket, GATT discovery/subscription/MTU, write pacing, request correlation, disconnect cleanup |
 | `MainActivity.java` | Permissions, device discovery, controls, log |
 | `res/mipmap*/ic_launcher.xml`, `res/drawable/ic_launcher_*.xml` | Vector launcher icon: adaptive (Android 8+, with themed-icon layer) and round fallback (Android 6-7) |
 | `GmCodecTest.java` | Desktop JVM codec tests against `bluetooth_wire.py` vectors |
 
 ## Verification status
 
-Verified: codec vectors on a desktop JVM; APK packaging, v1/v2/v3 signature
-verification, and manifest contents (including `neverForLocation`). **Not
-verified:** running on a phone or against real glasses. The firmware-side gaps
-listed in the developer guide still apply: MFi-enabled builds may not expose
-this GATT service, and long uplink notifications (device information, status)
-can exceed small MTUs. Record the firmware version, phone OS, and negotiated
-MTU when testing on hardware.
+Verified: codec and SPP stream-framing tests on a desktop JVM; APK packaging,
+v1/v2/v3 signature verification, and manifest contents (including
+`neverForLocation`). On a phone (Android 15/16): scanning lists the paired
+MemoMind One as `Classic (SPP)` (shown as Classic only before 0.3.0), and a BLE
+connection to it times out (status 147), which led to the SPP transport.
+**Not verified:** the Classic SPP connection and commands against real glasses,
+including whether a product build wraps GM frames in an outer transport
+envelope (the log shows skipped bytes if so). The BLE firmware gaps in the
+developer guide still apply. Record the firmware version, phone OS, and
+transport when testing on hardware.

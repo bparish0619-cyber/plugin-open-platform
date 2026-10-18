@@ -17,8 +17,8 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 NAME=memomind-ble-client
-VERSION_NAME=0.2.1
-VERSION_CODE=3
+VERSION_NAME=0.3.0
+VERSION_CODE=4
 MIN_SDK=23
 TARGET_SDK=34
 ANDROID_JAR=${ANDROID_JAR:-/usr/lib/android-sdk/platforms/android-23/android.jar}
