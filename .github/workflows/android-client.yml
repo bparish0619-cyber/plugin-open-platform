@@ -1,0 +1,40 @@
+name: Android client
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'AndroidClient/**'
+      - 'GlassSDK/docs/examples/bluetooth_wire.py'
+      - '.github/workflows/android-client.yml'
+  pull_request:
+    paths:
+      - 'AndroidClient/**'
+      - 'GlassSDK/docs/examples/bluetooth_wire.py'
+      - '.github/workflows/android-client.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Android build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            aapt dalvik-exchange zipalign apksigner android-sdk-platform-23
+
+      - name: Test codec and build APK
+        run: AndroidClient/build.sh
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: memomind-ble-client-apk
+          path: AndroidClient/dist/*.apk
+          if-no-files-found: error

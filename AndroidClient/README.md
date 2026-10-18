@@ -38,6 +38,12 @@ adb install -r AndroidClient/dist/memomind-ble-client-0.1.0.apk
 
 Or copy the file to the phone and allow installation from unknown sources.
 
+The [Android client workflow](../.github/workflows/android-client.yml) runs the
+codec tests and builds the APK on GitHub Actions for every pull request and
+`main` push that touches `AndroidClient/`; download it from the run's
+**memomind-ble-client-apk** artifact. Each run signs with a fresh debug key,
+so uninstall a previously installed build before installing a newer one.
+
 ## Use
 
 1. Tap **Scan**, grant Bluetooth and location permissions. On Android 11 and
