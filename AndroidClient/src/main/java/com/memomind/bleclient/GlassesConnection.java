@@ -25,36 +25,52 @@ import java.util.UUID;
  * is confined to one handler thread.
  */
 public final class GlassesConnection {
+    /** GM command downlink: phone writes complete GM frames here. */
     public static final UUID DOWNLINK = uuid16(0x2021);
+    /** GM response/event uplink: glasses notify complete GM frames here. */
     public static final UUID UPLINK = uuid16(0x2022);
+    /** Client Characteristic Configuration Descriptor that enables notifications. */
     public static final UUID CCCD = uuid16(0x2902);
 
+    /** Per-step wait for a write callback or response before failing the request. */
     static final long TIMEOUT_MS = 5000;
+    /** Largest ATT MTU Android can request; the peer may grant less. */
     static final int REQUESTED_MTU = 517;
 
+    /** Connection events for the UI. Called on the connection thread. */
     public interface Listener {
+        /** Human-readable link state; ready is true once commands can be sent. */
         void onState(String state, boolean ready);
+        /** One diagnostic line (TX/RX hex, state changes, errors). */
         void onLog(String line);
         /** Messages not matched to a pending request, such as 0F/29 plugin messages. */
         void onUnsolicited(GmCodec.Message message);
     }
 
+    /** Outcome of one request. Called on the connection thread. */
     public interface ResponseCallback {
         void onResponse(GmCodec.Message response);
         void onError(String error);
     }
 
+    /** One queued logical GM message and its progress through the write/ACK cycle. */
     private final class Request {
         final String label;
         final int service;
         final int command;
         final byte[] body;
         final ResponseCallback callback;
+        /** GM event ID; echoed in the response for correlation. */
         int event;
+        /** Physical frames sized for the current MTU. */
         List<byte[]> frames;
+        /** Index of the frame currently being written. */
         int index;
+        /** The platform reported the ATT write of frames[index] complete. */
         boolean writeDone;
+        /** The glasses sent the empty flow-control response for frames[index]. */
         boolean flowAck;
+        /** Final, non-flow-control response; set once received. */
         GmCodec.Message response;
 
         Request(String label, int service, int command, byte[] body, ResponseCallback callback) {
@@ -77,11 +93,16 @@ public final class GlassesConnection {
     private final ArrayDeque<Request> queue = new ArrayDeque<Request>();
     private final GmCodec.Reassembler reassembler = new GmCodec.Reassembler();
 
+    // All fields below are touched only on the handler thread.
     private BluetoothGatt gatt;
     private BluetoothGattCharacteristic downlink;
+    /** Negotiated ATT MTU; 23 is the Bluetooth default before negotiation. */
     private int mtu = 23;
+    /** True once the uplink CCCD write succeeded; requests wait for it. */
     private boolean ready;
+    /** Next GM event ID, cycling 1..255. One request is in flight, so IDs never collide. */
     private int nextEvent = 1;
+    /** The request currently on the air, or null. */
     private Request current;
 
     private final Runnable timeout = new Runnable() {
@@ -97,6 +118,10 @@ public final class GlassesConnection {
         handler = new Handler(thread.getLooper());
     }
 
+    /**
+     * Opens a GATT client to the device. autoConnect=false gives a direct,
+     * fast attempt; if the official App already holds a link, Android shares it.
+     */
     public void connect(final BluetoothDevice device) {
         handler.post(new Runnable() {
             public void run() {
@@ -113,6 +138,7 @@ public final class GlassesConnection {
         });
     }
 
+    /** Closes the link and fails any queued requests. */
     public void disconnect() {
         handler.post(new Runnable() {
             public void run() {
@@ -122,6 +148,7 @@ public final class GlassesConnection {
         });
     }
 
+    /** Disconnects and stops the connection thread; call from onDestroy. */
     public void shutdown() {
         disconnect();
         thread.quitSafely();
@@ -143,11 +170,13 @@ public final class GlassesConnection {
         });
     }
 
+    /** Starts the next queued request if the link is idle and ready. */
     private void startNext() {
         if (current != null || queue.isEmpty() || !ready) return;
         Request request = queue.poll();
         request.event = nextEvent;
         nextEvent = nextEvent == 0xFF ? 1 : nextEvent + 1;
+        // ATT value limit is MTU - 3 (opcode + handle); GM frames never exceed 512 bytes.
         int frameLimit = Math.min(GmCodec.MAX_FRAME, mtu - 3);
         try {
             request.frames = GmCodec.frames(request.event, request.service, request.command, request.body, frameLimit);
@@ -162,6 +191,10 @@ public final class GlassesConnection {
         writeFrame();
     }
 
+    /**
+     * Writes frames[index] with Write With Response. The pre-API-33 write call
+     * is used because the app compiles against API 23; it remains supported.
+     */
     @SuppressWarnings("deprecation")
     private void writeFrame() {
         Request request = current;
@@ -182,6 +215,7 @@ public final class GlassesConnection {
         if (!started) finish("characteristic write could not start");
     }
 
+    /** ATT write callback; this is link-level completion, not a GM business ACK. */
     private void onFrameWritten(int status) {
         Request request = current;
         if (request == null) return;
@@ -193,6 +227,11 @@ public final class GlassesConnection {
         advance();
     }
 
+    /**
+     * Routes a reassembled uplink message: a match on event/service/command is
+     * either the empty flow-control reply between fragments or the final
+     * response; anything else (e.g. 0F/29 plugin messages) is unsolicited.
+     */
     private void onMessage(GmCodec.Message message) {
         Request request = current;
         listener.onLog("RX " + String.format("%02X/%02X", message.service, message.command)
@@ -210,6 +249,12 @@ public final class GlassesConnection {
         listener.onUnsolicited(message);
     }
 
+    /**
+     * Moves the current request forward once both halves of a step are done.
+     * A final response is only delivered after its write callback, because
+     * Android allows one outstanding GATT operation and the next request's
+     * write would otherwise fail.
+     */
     private void advance() {
         Request request = current;
         if (request == null || !request.writeDone) return;
@@ -235,6 +280,7 @@ public final class GlassesConnection {
         startNext();
     }
 
+    /** Tears down the link and every piece of per-connection state. */
     private void closeGatt(String reason) {
         ready = false;
         reassembler.reset();
@@ -258,10 +304,16 @@ public final class GlassesConnection {
         }
     }
 
+    /** Ignores late callbacks from a GATT client that was already closed. */
     private boolean isCurrent(BluetoothGatt candidate) {
         return candidate == gatt;
     }
 
+    /**
+     * After discovery: finds the service holding both GM characteristics (its
+     * UUID differs between firmware representations, so it is not hardcoded),
+     * then enables uplink notifications before any write.
+     */
     private void setUp(BluetoothGatt candidate) {
         BluetoothGattCharacteristic up = null;
         BluetoothGattCharacteristic down = null;
@@ -307,6 +359,10 @@ public final class GlassesConnection {
         listener.onState("Subscribing to notifications", false);
     }
 
+    /**
+     * Binder-thread GATT callbacks. Each one copies what it needs and posts to
+     * the handler thread. Setup order: connect -> MTU -> discover -> CCCD -> ready.
+     */
     private final BluetoothGattCallback callback = new BluetoothGattCallback() {
         @Override
         public void onConnectionStateChange(final BluetoothGatt g, final int status, final int newState) {
@@ -328,7 +384,7 @@ public final class GlassesConnection {
                         }
                     } else {
                         closeGatt("link lost");
-                        listener.onState("Disconnected (GATT status " + status + ")", false);
+                        listener.onState("Disconnected (" + gattStatus(status) + ")", false);
                     }
                 }
             });
@@ -431,6 +487,19 @@ public final class GlassesConnection {
         }
     };
 
+    /** Explains the common connection failure codes seen in the field. */
+    static String gattStatus(int status) {
+        switch (status) {
+            case 0: return "normal";
+            case 8: return "status 8: supervision timeout, out of range";
+            case 19: return "status 19: glasses closed the link";
+            case 22: return "status 22: phone closed the link";
+            case 133: return "status 133: glasses not reachable; wake them or keep them near the phone";
+            default: return "GATT status " + status;
+        }
+    }
+
+    /** Expands a 16-bit Bluetooth UUID onto the Bluetooth base UUID. */
     private static UUID uuid16(int value) {
         return UUID.fromString(String.format("%08x-0000-1000-8000-00805f9b34fb", value));
     }

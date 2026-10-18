@@ -12,6 +12,39 @@ It does **not** install or launch GMP plugins (that transport is withheld and
 owned by the official App), stream microphone audio (BLE recording is not
 enabled in current firmware), or drive the HOGP gateway.
 
+## Install
+
+Download `memomind-ble-client-<version>.apk` from the repository's
+[Releases](../../../releases) page (tags `android-client-v*`) and open it on the
+phone, allowing installation from unknown sources. Or, with USB debugging:
+
+```sh
+adb install -r memomind-ble-client-0.2.0.apk
+```
+
+Requires Android 6.0 (API 23) or later with Bluetooth LE. Releases signed with
+a CI debug key cannot be installed over a differently signed build; uninstall
+the old one first. See [CHANGELOG.md](CHANGELOG.md) for changes.
+
+## Use
+
+1. Tap **Find glasses** and allow **Nearby devices** (Android 12+) or
+   **Location** (Android 6-11).
+2. Pick the glasses. Each row shows the name, where it was found, the
+   Bluetooth type, the address, and signal strength:
+
+   | Tag | Meaning |
+   | --- | --- |
+   | `[connected]` | The phone already has a link, usually the MemoMind App's. Select it; Android shares the link. |
+   | `[paired]` | Bonded in system Bluetooth settings. Must be powered on and in range. |
+   | `[nearby]` | Advertising now (BLE scan result). |
+
+3. The app connects, requests MTU 517, finds the service containing
+   `0x2021`/`0x2022`, and subscribes to `0x2022` before any write. Controls
+   enable when the state reads **Ready**.
+4. Send commands. The latest response appears under **Device**; every TX/RX
+   frame is in the hex **Log** (newest first).
+
 ## Features
 
 | Area | GM service / command | Response shown |
@@ -27,32 +60,20 @@ HUD text requires a compatible **Web Bridge glasses plugin already running**
 (started through the official App). Text is drawn as object 1 in a 300×120 box
 at (10, 10). Without that plugin the glasses return a nonzero plugin status.
 
-## Install
+## Troubleshooting: glasses not in the list
 
-Prebuilt APK: [`dist/memomind-ble-client-0.1.0.apk`](dist/memomind-ble-client-0.1.0.apk)
-(minSdk 23 / Android 6.0, targetSdk 34, debug-signed).
+Check the **Log** after a scan: `SCAN known devices` and `SCAN finished` lines
+give the counts of connected, paired, and advertising devices.
 
-```sh
-adb install -r AndroidClient/dist/memomind-ble-client-0.1.0.apk
-```
-
-Or copy the file to the phone and allow installation from unknown sources.
-
-The [Android client workflow](../.github/workflows/android-client.yml) runs the
-codec tests and builds the APK on GitHub Actions for every pull request and
-`main` push that touches `AndroidClient/`; download it from the run's
-**memomind-ble-client-apk** artifact. Each run signs with a fresh debug key,
-so uninstall a previously installed build before installing a newer one.
-
-## Use
-
-1. Tap **Scan**, grant Bluetooth and location permissions. On Android 11 and
-   earlier, system Location must be on for BLE scan results.
-2. Select the glasses. The app connects, requests MTU 517, discovers the
-   service containing `0x2021`/`0x2022`, and subscribes to `0x2022` before any
-   write. Controls enable when the state reads **Ready**.
-3. Send commands. The latest response appears under **Device**; every TX/RX
-   frame is in the hex **Log** (newest first).
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| Glasses work in the MemoMind App but are not listed as nearby | Connected glasses stop advertising | Use the `[connected]` or `[paired]` row; or close the App / turn Bluetooth off and on so the glasses advertise again |
+| No devices at all on Android 6–11 | Location is off; Android drops all BLE scan results | Turn on Location (the app opens the setting) |
+| "Permission denied" | Nearby devices / Location denied | Settings > Apps > MemoMind BLE Client > Permissions |
+| "Android allows 5 scans per 30 s" | Android throttles repeated scans and returns nothing | Wait for the countdown |
+| Glasses listed as `Classic only` | No BLE on this link | This client needs BLE GATT; the official App may use Classic SPP |
+| Connected, then "Unsupported: no service with 0x2021/0x2022" | Firmware does not expose the GM GATT service (for example MFi-enabled builds) | Not fixable in the app; record the firmware version |
+| "status 133" on connect | Glasses asleep or out of range | Wake the glasses, keep them close, retry |
 
 ## Protocol behavior
 
@@ -75,22 +96,47 @@ The build uses Ubuntu/Debian packages instead of Gradle and the Google SDK
 manager:
 
 ```sh
-sudo apt-get install aapt dalvik-exchange zipalign apksigner android-sdk-platform-23 openjdk-21-jdk-headless python3
+sudo apt-get install aapt dalvik-exchange zipalign apksigner android-sdk-platform-23 openjdk-21-jdk-headless python3 curl
 AndroidClient/build.sh          # codec tests + APK
 AndroidClient/build.sh test     # codec tests only (desktop JVM)
 AndroidClient/build.sh apk      # APK only
 ```
 
-The APK is written to `AndroidClient/dist/`. Signing uses
-`~/.android/debug.keystore` (created if missing). Set `KEYSTORE` or
-`ANDROID_JAR` to override. The sources follow the standard
-`src/main/{AndroidManifest.xml,java,res}` layout, so they can be imported into
-an Android Studio/Gradle project.
+The APK is written to `AndroidClient/dist/` (not committed). Java compiles
+against the API 23 stubs; the manifest links against API 34 framework
+resources, which `build.sh` downloads once (137 MB, Robolectric `android-all`
+from Maven Central, SHA-256 pinned) into `~/.cache/memomind-ble-client/`. Set
+`FRAMEWORK_JAR` to use an existing copy, such as an SDK `android-34/android.jar`.
+
+Signing uses `~/.android/debug.keystore` (created if missing) unless `KEYSTORE`,
+`KEYSTORE_PASS`, `KEY_ALIAS`, and `KEY_PASS` are set.
 
 `build.sh test` checks `GmCodec` against the reference codec: every example in
 [`bluetooth_wire.py`](../GlassSDK/docs/examples/bluetooth_wire.py) at 20, 64, 244, and
 512-byte frame limits, the fragmented 600-byte vector, and malformed-frame,
 TLV, and reassembly-recovery cases.
+
+## CI and releases
+
+- [android-client.yml](../.github/workflows/android-client.yml) runs the tests and
+  builds the APK for pull requests and `main` pushes touching `AndroidClient/`,
+  uploading it as the **memomind-ble-client-apk** artifact.
+- [android-release.yml](../.github/workflows/android-release.yml) runs on tags
+  `android-client-v<version>` (matching `VERSION_NAME` in `build.sh`), builds
+  the APK, and publishes a GitHub release with the matching
+  [CHANGELOG](CHANGELOG.md) section.
+
+To release: bump `VERSION_NAME`/`VERSION_CODE` in `build.sh`, add a CHANGELOG
+section, merge, then tag `main`:
+
+```sh
+git tag android-client-v0.2.0 origin/main && git push origin android-client-v0.2.0
+```
+
+For installable upgrades across releases, add a stable signing key as
+repository secrets: `ANDROID_KEYSTORE_BASE64` (`base64 -w0 release.keystore`),
+`ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, and `ANDROID_KEY_PASSWORD`.
+Without them, each build is signed with a fresh debug key.
 
 ## Code map
 
@@ -98,13 +144,15 @@ TLV, and reassembly-recovery cases.
 | --- | --- |
 | `GmCodec.java` | Framing, fragmentation, checksums, reassembly, TLVs, status namespaces |
 | `GlassesConnection.java` | GATT discovery, subscription, MTU, write pacing, request correlation, disconnect cleanup |
-| `MainActivity.java` | Permissions, scanning, controls, log |
+| `MainActivity.java` | Permissions, device discovery, controls, log |
+| `GmCodecTest.java` | Desktop JVM codec tests against `bluetooth_wire.py` vectors |
 
 ## Verification status
 
 Verified: codec vectors on a desktop JVM; APK packaging, v1/v2/v3 signature
-verification, and manifest contents. **Not verified:** running on a phone or
-against real glasses. The firmware-side gaps listed in the developer guide still
-apply: MFi-enabled builds may not expose this GATT service, and long uplink
-notifications (device information, status) can exceed small MTUs. Record the
-firmware version, phone OS, and negotiated MTU when testing on hardware.
+verification, and manifest contents (including `neverForLocation`). **Not
+verified:** running on a phone or against real glasses. The firmware-side gaps
+listed in the developer guide still apply: MFi-enabled builds may not expose
+this GATT service, and long uplink notifications (device information, status)
+can exceed small MTUs. Record the firmware version, phone OS, and negotiated
+MTU when testing on hardware.

@@ -120,6 +120,25 @@ transactions are withheld; ordinary application and accessory data are public.
 For the complete scan/connect/directional-input/disconnect workflow from an
 independent desktop or mobile client, see the [HOGP quick start](GlassSDK/docs/HOGP_QUICKSTART.md).
 
-A minimal native Android client that implements the BLE GM command link
-(device queries, display settings, notifications, Web Bridge HUD text) is in
-[`AndroidClient/`](AndroidClient/README.md), with a prebuilt APK.
+## Android BLE client
+
+[`AndroidClient/`](AndroidClient/README.md) is a native Android app (Android 6.0+)
+that controls the glasses directly over the public BLE GM command link, without
+the official App:
+
+- device heartbeat, information, and status queries;
+- brightness, auto brightness, vertical position, and optical distance;
+- notifications, and Web Bridge HUD text/clear when a Web Bridge plugin is running.
+
+**Download:** the APK is attached to each `android-client-v*` release on the
+repository's [Releases](../../releases) page. Install it on the phone, tap
+**Find glasses**, and select the glasses. Glasses already connected to the
+MemoMind App appear as `[connected]` or `[paired]` rather than as a scan result;
+see [troubleshooting](AndroidClient/README.md#troubleshooting-glasses-not-in-the-list).
+
+**Build:** `AndroidClient/build.sh` runs the codec tests and builds a signed APK
+with Ubuntu's Android packages. GitHub Actions builds every pull request and
+publishes releases from tags; see [CI and releases](AndroidClient/README.md#ci-and-releases).
+
+The app does not install GMP plugins or stream microphone audio, and it has not
+yet been verified against physical glasses.

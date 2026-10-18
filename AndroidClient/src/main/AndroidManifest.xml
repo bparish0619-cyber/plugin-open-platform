@@ -2,14 +2,19 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.memomind.bleclient">
 
+    <!-- The app is useless without BLE, so stores hide it on devices lacking it. -->
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
 
-    <!-- Android 6-11: legacy Bluetooth permissions plus location for BLE scans. -->
+    <!-- Android 6-11: legacy Bluetooth permissions. Fine location is required for
+         any BLE scan result on these versions, and system Location must be on. -->
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <!-- Android 12+: runtime Bluetooth permissions. -->
-    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
+
+    <!-- Android 12+: "Nearby devices" runtime permissions. neverForLocation asserts the
+         app does not derive location from scans, so scanning works with Location off. -->
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
     <application
