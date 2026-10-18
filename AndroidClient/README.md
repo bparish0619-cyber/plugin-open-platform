@@ -121,13 +121,14 @@ TLV, and reassembly-recovery cases.
 - [android-client.yml](../.github/workflows/android-client.yml) runs the tests and
   builds the APK for pull requests and `main` pushes touching `AndroidClient/`,
   uploading it as the **memomind-ble-client-apk** artifact.
-- [android-release.yml](../.github/workflows/android-release.yml) runs on tags
-  `android-client-v<version>` (matching `VERSION_NAME` in `build.sh`), builds
-  the APK, and publishes a GitHub release with the matching
-  [CHANGELOG](CHANGELOG.md) section.
+- [android-release.yml](../.github/workflows/android-release.yml) builds the APK
+  and publishes a GitHub release `android-client-v<version>` (from
+  `VERSION_NAME` in `build.sh`) with the matching [CHANGELOG](CHANGELOG.md)
+  section. Running it again for the same version replaces the APK.
 
 To release: bump `VERSION_NAME`/`VERSION_CODE` in `build.sh`, add a CHANGELOG
-section, merge, then tag `main`:
+section, and merge. Then either open **Actions > Android client release > Run
+workflow** on `main` (the workflow creates the tag), or push the tag yourself:
 
 ```sh
 git tag android-client-v0.2.0 origin/main && git push origin android-client-v0.2.0
