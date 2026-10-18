@@ -119,3 +119,7 @@ transactions are withheld; ordinary application and accessory data are public.
 
 For the complete scan/connect/directional-input/disconnect workflow from an
 independent desktop or mobile client, see the [HOGP quick start](GlassSDK/docs/HOGP_QUICKSTART.md).
+
+A minimal native Android client that implements the BLE GM command link
+(device queries, display settings, notifications, Web Bridge HUD text) is in
+[`AndroidClient/`](AndroidClient/README.md), with a prebuilt APK.
