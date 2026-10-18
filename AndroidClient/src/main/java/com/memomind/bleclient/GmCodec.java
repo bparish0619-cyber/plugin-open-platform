@@ -8,18 +8,33 @@ import java.util.List;
 /**
  * GM framing and TLV codec for the public business protocol.
  *
- * Mirrors GlassSDK/docs/examples/bluetooth_wire.py. Pure Java so it can be
+ * <p>Wire layout of one physical frame (GlassSDK/docs/PROTOCOL.md):
+ * <pre>
+ * head:u8  logical_length:u24  event:u8  service:u8  command:u8  body...  sum:u16
+ * </pre>
+ * head is 0xFA for the first frame and 1, 2, ... for continuations. Every
+ * frame repeats the logical length (all TLV bytes + 9) and event/service/
+ * command, and carries its own additive checksum. All integers are
+ * big-endian. The body is a TLV stream that may straddle frames.
+ *
+ * <p>Mirrors GlassSDK/docs/examples/bluetooth_wire.py. Pure Java so it can be
  * tested on a desktop JVM. No GMP installer operations.
  */
 public final class GmCodec {
+    /** Largest logical message the reference client accepts (80 KiB). */
     public static final int MAX_LOGICAL = 80 * 1024;
+    /** Firmware physical frame ceiling. */
     public static final int MAX_FRAME = 512;
+    /** Bytes before the body: head, 24-bit length, event, service, command. */
     public static final int HEADER = 7;
+    /** Header plus the two checksum bytes. */
     public static final int ENVELOPE = 9;
+    /** Head byte of the first frame of a message. */
     public static final int FIRST_HEAD = 0xFA;
     /** Keep below the App/firmware continuation-head wrap difference. */
     public static final int MAX_FRAMES = 239;
 
+    // TLV types: type:u8, length:u24, value.
     public static final int TLV_BYTES = 0x01;
     public static final int TLV_STRING = 0x02;
     public static final int TLV_INT32 = 0x03;
@@ -28,6 +43,7 @@ public final class GmCodec {
     public static final int TLV_INT16 = 0x07;
     public static final int TLV_INT8 = 0x08;
 
+    // Services and commands used by the app (DEVICE_BUSINESS_PROTOCOL.md, PROTOCOL.md).
     public static final int SERVICE_SYSTEM = 0x01;
     public static final int SERVICE_NOTIFICATION = 0x05;
     public static final int SERVICE_PLUGIN = 0x0F;
@@ -46,6 +62,7 @@ public final class GmCodec {
 
     private GmCodec() {}
 
+    /** Encodes one TLV: type, 24-bit big-endian length, value. */
     public static byte[] tlv(int type, byte[] value) {
         if (value.length > MAX_LOGICAL - 13) {
             throw new IllegalArgumentException("TLV exceeds logical limit");
@@ -75,6 +92,7 @@ public final class GmCodec {
         return tlv(TLV_JSON, value.getBytes(UTF8));
     }
 
+    /** Joins TLVs into one body. */
     public static byte[] concat(byte[]... parts) {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         for (byte[] part : parts) out.write(part, 0, part.length);
@@ -139,6 +157,7 @@ public final class GmCodec {
         return result;
     }
 
+    /** Additive sum of the first length bytes, modulo 65536. */
     static int checksum(byte[] data, int length) {
         int sum = 0;
         for (int i = 0; i < length; i++) sum += data[i] & 0xFF;
@@ -293,6 +312,7 @@ public final class GmCodec {
         }
     }
 
+    /** Parses a reassembled body; rejects truncation and wrong integer widths. */
     public static List<Tlv> parseTlvs(byte[] body) {
         List<Tlv> result = new ArrayList<Tlv>();
         int pos = 0;
@@ -402,6 +422,7 @@ public final class GmCodec {
         return out.toString();
     }
 
+    /** Space-separated uppercase hex, for the log. */
     public static String hex(byte[] data) {
         StringBuilder out = new StringBuilder(data.length * 3);
         for (int i = 0; i < data.length; i++) {

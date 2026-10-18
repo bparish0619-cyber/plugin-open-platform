@@ -1,3 +1,5 @@
+# Builds the MemoMind BLE client APK: codec tests, then aapt/dx/zipalign/apksigner
+# via AndroidClient/build.sh. Also called by android-release.yml for tagged releases.
 name: Android client
 
 on:
@@ -12,7 +14,18 @@ on:
       - 'AndroidClient/**'
       - 'GlassSDK/docs/examples/bluetooth_wire.py'
       - '.github/workflows/android-client.yml'
+      - '.github/workflows/android-release.yml'
   workflow_dispatch:
+  workflow_call:
+    secrets:
+      ANDROID_KEYSTORE_BASE64:
+        required: false
+      ANDROID_KEYSTORE_PASSWORD:
+        required: false
+      ANDROID_KEY_ALIAS:
+        required: false
+      ANDROID_KEY_PASSWORD:
+        required: false
 
 permissions:
   contents: read
@@ -29,7 +42,33 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             aapt dalvik-exchange zipalign apksigner android-sdk-platform-23
 
+      # API 34 framework resources (137 MB) used to link the manifest.
+      - name: Cache framework resources
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/memomind-ble-client
+          key: android-all-34-6be2218c
+
+      # Uses the release key when the repository has signing secrets;
+      # otherwise build.sh signs with a fresh debug key.
+      - name: Prepare signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+            echo "KEYSTORE=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+            echo "Signing with the repository release key"
+          else
+            echo "No ANDROID_KEYSTORE_BASE64 secret; signing with a debug key"
+          fi
+
       - name: Test codec and build APK
+        env:
+          KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        # Empty secrets fall back to the debug defaults in build.sh.
         run: AndroidClient/build.sh
 
       - name: Upload APK
